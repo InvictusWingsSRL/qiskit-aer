@@ -179,17 +179,14 @@ private:
   std::vector<cmatrix_t> data_;
 
   static double chop_threshold_;
-  static uint_t max_bond_dimension_;
-  static double truncation_threshold_;
+  uint_t max_bond_dimension_ = UINT64_MAX;
+  double truncation_threshold_ = 1e-16;
 };
 
 //=========================================================================
 // Implementation
 //=========================================================================
 double MPS_Tensor::chop_threshold_ = CHOP_THRESHOLD;
-uint_t MPS_Tensor::max_bond_dimension_ = UINT64_MAX;
-double MPS_Tensor::truncation_threshold_ = 1e-16;
-
 const double MPS_Tensor::SQR_HALF = sqrt(0.5);
 
 //---------------------------------------------------------------
