@@ -103,23 +103,15 @@ public:
   std::vector<cmatrix_t> &get_data() { return data_; }
   void insert_data(uint_t a1, uint_t a2, cvector_t data);
 
-  static void set_chop_threshold(double chop_threshold) {
+  void set_chop_threshold(double chop_threshold) {
     chop_threshold_ = chop_threshold;
   }
 
-  static void set_max_bond_dimension(uint_t max_bond_dimension) {
-    max_bond_dimension_ = max_bond_dimension;
-  }
 
-  static void set_truncation_threshold(double truncation_threshold) {
-    truncation_threshold_ = truncation_threshold;
-  }
 
   static double get_chop_threshold() { return chop_threshold_; }
 
-  static uint_t get_max_bond_dimension() { return max_bond_dimension_; }
 
-  static double get_truncation_threshold() { return truncation_threshold_; }
   //------------------------------------------------------------------
   // function name: get_dim
   // Description: Get the dimension of the physical index of the tensor
@@ -159,7 +151,8 @@ public:
                              const MPS_Tensor &right_gamma, bool mul_by_lambda);
   static double Decompose(MPS_Tensor &temp, MPS_Tensor &left_gamma,
                           rvector_t &lambda, MPS_Tensor &right_gamma,
-                          bool mps_lapack);
+                          bool mps_lapack, uint_t max_bond_dimension,
+                          double truncation_threshold);
   static void
   reshape_for_3_qubits_before_SVD(const std::vector<cmatrix_t> &data,
                                   MPS_Tensor &reshaped_tensor);
@@ -179,14 +172,13 @@ private:
   std::vector<cmatrix_t> data_;
 
   static double chop_threshold_;
-  uint_t max_bond_dimension_ = UINT64_MAX;
-  double truncation_threshold_ = 1e-16;
 };
 
 //=========================================================================
 // Implementation
 //=========================================================================
 double MPS_Tensor::chop_threshold_ = CHOP_THRESHOLD;
+
 const double MPS_Tensor::SQR_HALF = sqrt(0.5);
 
 //---------------------------------------------------------------
@@ -590,7 +582,8 @@ void MPS_Tensor::contract_2_dimensions(const MPS_Tensor &left_gamma,
 //---------------------------------------------------------------
 double MPS_Tensor::Decompose(MPS_Tensor &temp, MPS_Tensor &left_gamma,
                              rvector_t &lambda, MPS_Tensor &right_gamma,
-                             bool mps_lapack) {
+                             bool mps_lapack, uint_t max_bond_dimension,
+                             double truncation_threshold) {
   cmatrix_t C;
   C = reshape_before_SVD(temp.data_);
   cmatrix_t U, V;
@@ -598,8 +591,8 @@ double MPS_Tensor::Decompose(MPS_Tensor &temp, MPS_Tensor &left_gamma,
 
   csvd_wrapper(C, U, S, V, mps_lapack);
   double discarded_value = 0.0;
-  discarded_value = reduce_zeros(U, S, V, max_bond_dimension_,
-                                 truncation_threshold_, mps_lapack);
+  discarded_value = reduce_zeros(U, S, V, max_bond_dimension,
+                                 truncation_threshold, mps_lapack);
 
   left_gamma.data_ = reshape_U_after_SVD(U);
   lambda = S;
