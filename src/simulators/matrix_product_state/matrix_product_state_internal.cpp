@@ -818,7 +818,7 @@ void MPS::apply_multi_qubit_gate(const reg_t &qubits, const cmatrix_t &mat,
       if (row == col)
         new_mat(new_vec[row], new_vec[row]) = mat(row, row);
       else
-        new_mat(new_vec[row], new_vec[col]) = mat(row, col);
+        new_mat(new_vec[row], new_vec[col]) = is_diagonal ? 0. : mat(row, col);
     }
   }
 
