@@ -837,9 +837,6 @@ void MPS::apply_multi_qubit_gate(const reg_t &qubits, const cmatrix_t &mat,
   } else {
     for (uint_t col = 0; col < sidelen; ++col) {
       for (uint_t row = 0; row < sidelen; ++row) {
-        if (row == col)
-          new_mat(new_vec[row], new_vec[row]) = mat(row, row);
-        else
           new_mat(new_vec[row], new_vec[col]) = mat(row, col);
       }
     }
