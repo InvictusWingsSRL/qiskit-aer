@@ -103,11 +103,9 @@ public:
   std::vector<cmatrix_t> &get_data() { return data_; }
   void insert_data(uint_t a1, uint_t a2, cvector_t data);
 
-  void set_chop_threshold(double chop_threshold) {
+  static void set_chop_threshold(double chop_threshold) {
     chop_threshold_ = chop_threshold;
   }
-
-
 
   static double get_chop_threshold() { return chop_threshold_; }
 
