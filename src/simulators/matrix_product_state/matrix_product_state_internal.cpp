@@ -1680,7 +1680,7 @@ reg_t MPS::sort_measured_values(const reg_t &input_outcome,
 //        probability. We then update 'mat' by contracting it with the suitable
 //        matrix (0 or 1).
 
-reg_t MPS::sample_measure(uint_t shots, RngEngine &rng) const {
+reg_t MPS::sample_measure(RngEngine &rng) const {
   double prob = 1;
   reg_t current_measure(num_qubits_);
   cmatrix_t mat;
