@@ -1728,10 +1728,6 @@ uint_t MPS::sample_measure_single_qubit(uint_t qubit, double &prob, double rnd,
     mat = q_reg_[qubit].get_data(measurement);
   } else {
     mat = mat * q_reg_[qubit].get_data(measurement);
-    // multiply mat by left lambda
-    for (uint_t col = 0; col < mat.GetColumns(); col++)
-      for (uint_t row = 0; row < mat.GetRows(); row++)
-        mat(row, col) *= lambda_reg_[qubit - 1][row];
   }
   if (qubit != num_qubits_ - 1) { // multiply mat by right lambda
     for (uint_t row = 0; row < mat.GetRows(); row++)
