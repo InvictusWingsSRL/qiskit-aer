@@ -864,9 +864,9 @@ double State::expval_pauli(const reg_t &qubits, const std::string &pauli,
 }
 
 double State::expval_pauli(const reg_t &qubits, const std::string &pauli) {
-  // empty implementation of base class virtual method
-  // since in the extended stabilizer, expval relies on RNG
-  return 0;
+  RngEngine rng;
+  rng.set_random_seed();
+  return expval_pauli(qubits, pauli, rng)  ;
 }
 
 //-------------------------------------------------------------------------
