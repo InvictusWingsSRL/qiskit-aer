@@ -407,11 +407,17 @@ double Runner::norm_estimation(uint_t n_samples, uint_t repetitions,
   const int_t NSAMPLES = n_samples;
   const int_t NQUBITS = n_qubits_;
   std::vector<double> xi_samples(repetitions, 0.);
+  std::vector<AER::RngEngine> rngs(num_threads_);
+  rngs[0] = rng;
+  for (uint_t i = 1; i < num_threads_; i++) {
+    rngs[i].set_seed(rng.initial_seed() + i);
+  }
   for (uint_t m = 0; m < repetitions; m++) {
     std::vector<uint_t> adiag_1(n_samples, 0ULL);
     std::vector<uint_t> adiag_2(n_samples, 0ULL);
     std::vector<std::vector<uint_t>> a(n_samples,
                                        std::vector<uint_t>(n_qubits_, 0ULL));
+
 #pragma omp parallel if (num_threads_ > 1) num_threads(num_threads_)
     {
 #ifdef _WIN32
@@ -420,15 +426,16 @@ double Runner::norm_estimation(uint_t n_samples, uint_t repetitions,
 #pragma omp for collapse(2)
 #endif
       for (int_t l = 0; l < NSAMPLES; l++) {
+        int tid = omp_get_thread_num();
         for (int_t i = 0; i < NQUBITS; i++) {
           for (int_t j = i; j < NQUBITS; j++) {
-            if (rng.rand() < 0.5) {
+            if (rngs[tid].rand() < 0.5) {
               a[l][i] |= (1ULL << j);
               a[l][j] |= (1ULL << i);
             }
           }
           adiag_1[l] |= (a[l][i] & (1ULL << i));
-          if (rng.rand() < 0.5) {
+          if (rngs[tid].rand() < 0.5) {
             adiag_2[l] |= (1ULL << i);
           }
         }
