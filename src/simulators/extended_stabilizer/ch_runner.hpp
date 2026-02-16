@@ -420,13 +420,13 @@ double Runner::norm_estimation(uint_t n_samples, uint_t repetitions,
 
 #pragma omp parallel if (num_threads_ > 1) num_threads(num_threads_)
     {
+      int tid = omp_get_thread_num();
 #ifdef _WIN32
 #pragma omp for
 #else
 #pragma omp for collapse(2)
 #endif
       for (int_t l = 0; l < NSAMPLES; l++) {
-        int tid = omp_get_thread_num();
         for (int_t i = 0; i < NQUBITS; i++) {
           for (int_t j = i; j < NQUBITS; j++) {
             if (rngs[tid].rand() < 0.5) {
