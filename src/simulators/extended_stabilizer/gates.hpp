@@ -82,7 +82,7 @@ const AER::stringmap_t<Gatetypes> gate_types_ = {
     {"tdg", Gatetypes::non_clifford}, // Conjguate-transpose of T gate
     {"u1", Gatetypes::non_clifford},  // zero-X90 pulse waltz gate
     {"p", Gatetypes::non_clifford},   // zero-X90 pulse waltz gate
-    {"rz", Gatetypes::clifford},      // RZ gate (only support k * pi/2 cases)
+    {"rz", Gatetypes::non_clifford},  // RZ gate (Clifford for k * pi/2 cases)
     // Two-qubit gates
     {"CX", Gatetypes::clifford},   // Controlled-X gate (CNOT)
     {"cx", Gatetypes::clifford},   // Controlled-X gate (CNOT)
@@ -97,14 +97,6 @@ const AER::stringmap_t<Gatetypes> gate_types_ = {
 };
 
 using sample_branch_t = std::pair<complex_t, Gates>;
-
-const double root2 = std::sqrt(2);
-const double root1_2 = 1. / root2;
-const complex_t pi_over_8_phase(0., M_PI / 8);
-const complex_t omega(root1_2, root1_2);
-const complex_t omega_star(root1_2, -1 * root1_2);
-const complex_t root_omega = std::exp(pi_over_8_phase);
-const complex_t root_omega_star = std::conj(root_omega);
 
 const double tan_pi_over_8 = std::tan(M_PI / 8.);
 
@@ -153,40 +145,42 @@ U1Sample::U1Sample(double lambda) {
   } else if (lambda < -1 * M_PI) {
     lambda += 2 * M_PI;
   }
-  // Compute the coefficients
-  double angle = std::abs(lambda);
-  bool s_z_quadrant = (angle > M_PI / 2);
-  if (s_z_quadrant) {
-    angle = angle - M_PI / 2;
-  }
-  angle /= 2;
-  complex_t coeff_0 = std::cos(angle) - std::sin(angle);
-  complex_t coeff_1 = root2 * std::sin(angle);
-  complex_t phase_0, phase_1;
+  // Compute an exact decomposition of P(lambda) into two Clifford gates.
+  // Sampling retains only the phases of these coefficients; their magnitudes
+  // determine the branch probabilities and the stabilizer extent.
+  const complex_t target_phase = std::polar(1.0, lambda);
+  const complex_t one(1., 0.);
+  const complex_t imag(0., 1.);
+  complex_t coeff_0;
+  complex_t coeff_1;
   std::array<Gates, 2> gates;
   if (lambda < 0) {
-    coeff_0 *= root_omega_star;
-    coeff_1 = coeff_1 * root_omega;
-    if (s_z_quadrant) {
+    if (lambda < -M_PI / 2) {
       gates[0] = Gates::sdg;
       gates[1] = Gates::z;
+      coeff_0 = (one + target_phase) / (one - imag);
+      coeff_1 = one - coeff_0;
     } else {
       gates[0] = Gates::id;
       gates[1] = Gates::sdg;
+      coeff_1 = (target_phase - one) / (-imag - one);
+      coeff_0 = one - coeff_1;
     }
   } else {
-    coeff_0 *= root_omega;
-    coeff_1 = coeff_1 * root_omega_star;
-    if (s_z_quadrant) {
+    if (lambda > M_PI / 2) {
       gates[0] = Gates::s;
       gates[1] = Gates::z;
+      coeff_0 = (one + target_phase) / (one + imag);
+      coeff_1 = one - coeff_0;
     } else {
       gates[0] = Gates::id;
       gates[1] = Gates::s;
+      coeff_1 = (target_phase - one) / (imag - one);
+      coeff_0 = one - coeff_1;
     }
   }
-  phase_0 = std::polar(1.0, std::arg(coeff_0));
-  phase_1 = std::polar(1.0, std::arg(coeff_1));
+  const complex_t phase_0 = std::polar(1.0, std::arg(coeff_0));
+  const complex_t phase_1 = std::polar(1.0, std::arg(coeff_1));
   branches = {sample_branch_t(phase_0, gates[0]),
               sample_branch_t(phase_1, gates[1])};
   p_threshold = std::abs(coeff_0) / (std::abs(coeff_0) + std::abs(coeff_1));

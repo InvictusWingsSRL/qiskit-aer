@@ -886,7 +886,17 @@ class QasmSimulator(AerBackend):
                 ]
             )
         if method == "extended_stabilizer":
-            return sorted(["quantum_channel", "qerror_loc", "roerror", "save_statevector"])
+            return sorted(
+                [
+                    "quantum_channel",
+                    "qerror_loc",
+                    "roerror",
+                    "save_expval",
+                    "save_expval_var",
+                    "save_statevector",
+                    "save_amplitudes_sq",
+                ]
+            )
         return QasmSimulator._DEFAULT_CUSTOM_INSTR
 
     def _set_method_config(self, method=None):

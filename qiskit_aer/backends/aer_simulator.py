@@ -608,7 +608,10 @@ class AerSimulator(AerBackend):
                 "quantum_channel",
                 "qerror_loc",
                 "roerror",
+                "save_expval",
+                "save_expval_var",
                 "save_statevector",
+                "save_amplitudes_sq",
                 "reset",
                 "delay",
             ]

@@ -92,9 +92,6 @@ public:
   std::vector<SampleVector> sample_measure(const reg_t &qubits, uint_t shots,
                                            RngEngine &rng) override;
 
-  bool
-  validate_parameters(const std::vector<Operations::Op> &ops) const override;
-
 protected:
   // Alongside the sample measure optimisaiton, we can parallelise
   // circuit applicaiton over the states. This reduces the threading overhead
@@ -117,6 +114,13 @@ protected:
   // clear
   void apply_gate(const Operations::Op &op, RngEngine &rng);
   void apply_gate(const Operations::Op &op, RngEngine &rng, uint_t rank);
+
+  // Apply effects which belong to the logical gate rather than to each term
+  // in the stabilizer decomposition.
+  void apply_gate_global_phase(const Operations::Op &op);
+
+  // Return whether an operation requires a sampled Clifford decomposition.
+  bool is_non_clifford(const Operations::Op &op) const;
 
   // Apply a multi-qubit Pauli gate
   void apply_pauli(const reg_t &qubits, const std::string &pauli, uint_t rank);
@@ -252,13 +256,12 @@ void State::set_config(const Config &config) {
   // Set the error upper bound in the stabilizer rank approximation
   approximation_error_ = config.extended_stabilizer_approximation_error;
   // Set the number of samples used in the norm estimation routine
+  norm_estimation_samples_ = config.extended_stabilizer_norm_estimation_samples;
+  // Retain support for the deprecated alias when it is explicitly set.
   if (config.extended_stabilizer_norm_estimation_default_samples.has_value())
     norm_estimation_samples_ =
         config.extended_stabilizer_norm_estimation_default_samples.value();
-  // Set the desired number of repetitions of the norm estimation step. If not
-  // explicitly set, we compute a default basd on the approximation error
-  norm_estimation_repetitions_ =
-      std::llrint(std::log2(1. / approximation_error_));
+  // Set the desired number of repetitions of the norm estimation step.
   norm_estimation_repetitions_ =
       config.extended_stabilizer_norm_estimation_repetitions;
   // Set the number of steps used in the metropolis sampler before we
@@ -295,8 +298,7 @@ std::pair<uint_t, uint_t> State::decomposition_parameters(InputIterator first,
   for (auto op = first; op != last; op++) {
     if (op->type == Operations::OpType::gate) {
       compute_extent(op, xi);
-      auto it = CHSimulator::gate_types_.find(op->name);
-      if (it->second == CHSimulator::Gatetypes::non_clifford &&
+      if (is_non_clifford(*op) &&
           op->qubits.size() == 3) { // We count the number of 3 qubit gates for
                                     // normalisation purposes
         three_qubit_gate_count++;
@@ -324,7 +326,7 @@ std::pair<bool, size_t> State::check_stabilizer_opt(InputIterator first,
                                   "recognise a the operation \'" +
                                   op->name + "\'.");
     }
-    if (it->second == CHSimulator::Gatetypes::non_clifford) {
+    if (is_non_clifford(*op)) {
       return std::pair<bool, size_t>({false, op - first});
     }
   }
@@ -345,23 +347,6 @@ bool State::check_measurement_opt(InputIterator first,
         op->type == Operations::OpType::save_expval ||
         op->type == Operations::OpType::save_expval_var) {
       return false;
-    }
-  }
-  return true;
-}
-
-bool State::validate_parameters(const std::vector<Operations::Op> &ops) const {
-  for (uint_t i = 0; i < ops.size(); i++) {
-    if (ops[i].type == OpType::gate) {
-      // check parameter of RZ gates
-      if (ops[i].name == "rz") {
-        double pi2 = std::real(ops[i].params[0]) * 2.0 / M_PI;
-        double pi2_int = (double)std::round(pi2);
-
-        if (!AER::Linalg::almost_equal(pi2, pi2_int)) {
-          return false;
-        }
-      }
     }
   }
   return true;
@@ -497,6 +482,12 @@ void State::apply_ops_parallel(InputIterator first, InputIterator last,
                                ExperimentResult &result, RngEngine &rng) {
   const int_t NUM_STATES = BaseState::qreg_.get_num_states();
 
+  for (auto it = first; it != last; ++it) {
+    if (it->type == Operations::OpType::gate) {
+      apply_gate_global_phase(*it);
+    }
+  }
+
   std::vector<size_t> rng_seeds(NUM_STATES);
   for (int_t i = 0; i < NUM_STATES; i++) {
     rng_seeds[i] = rng.rand_int<size_t>(0, SIZE_MAX);
@@ -536,6 +527,7 @@ void State::apply_stabilizer_circuit(InputIterator first, InputIterator last,
     if (BaseState::creg().check_conditional(op)) {
       switch (op.type) {
       case Operations::OpType::gate:
+        apply_gate_global_phase(op);
         apply_gate(op, rng, 0);
         break;
       case Operations::OpType::reset:
@@ -658,13 +650,66 @@ void State::apply_reset(const reg_t &qubits, AER::RngEngine &rng) {
 
 void State::apply_gate(const Operations::Op &op, RngEngine &rng) {
   const int_t NUM_STATES = BaseState::qreg_.get_num_states();
+  apply_gate_global_phase(op);
+
+  if (is_non_clifford(op)) {
+    std::vector<size_t> rng_seeds(NUM_STATES);
+    for (int_t i = 0; i < NUM_STATES; i++) {
+      rng_seeds[i] = rng.rand_int<size_t>(0, SIZE_MAX);
+    }
 #pragma omp parallel for if (BaseState::threads_ > 1 &&                        \
                              BaseState::qreg_.check_omp_threshold())           \
     num_threads(BaseState::threads_)
-  for (int_t i = 0; i < NUM_STATES; i++) {
-    if (BaseState::qreg_.check_eps(i)) {
-      apply_gate(op, rng, i);
+    for (int_t i = 0; i < NUM_STATES; i++) {
+      if (BaseState::qreg_.check_eps(i)) {
+        RngEngine local_rng(rng_seeds[i]);
+        apply_gate(op, local_rng, i);
+      }
     }
+  } else {
+#pragma omp parallel for if (BaseState::threads_ > 1 &&                        \
+                             BaseState::qreg_.check_omp_threshold())           \
+    num_threads(BaseState::threads_)
+    for (int_t i = 0; i < NUM_STATES; i++) {
+      if (BaseState::qreg_.check_eps(i)) {
+        apply_gate(op, rng, i);
+      }
+    }
+  }
+}
+
+bool State::is_non_clifford(const Operations::Op &op) const {
+  auto gate_type = CHSimulator::gate_types_.find(op.name);
+  if (gate_type == CHSimulator::gate_types_.end()) {
+    throw std::invalid_argument("CH::State: Invalid gate operation '" +
+                                op.name + "'.");
+  }
+  if ((op.name == "rz" || op.name == "u1" || op.name == "p") &&
+      !op.params.empty()) {
+    const double pi2 = std::real(op.params[0]) * 2.0 / M_PI;
+    return !AER::Linalg::almost_equal(pi2, std::round(pi2));
+  }
+  return gate_type->second == CHSimulator::Gatetypes::non_clifford;
+}
+
+void State::apply_gate_global_phase(const Operations::Op &op) {
+  auto gate = gateset_.find(op.name);
+  if (gate == gateset_.end()) {
+    throw std::invalid_argument("CH::State: Invalid gate operation '" +
+                                op.name + "'.");
+  }
+  switch (gate->second) {
+  case Gates::sx:
+    BaseState::add_global_phase(M_PI / 4.);
+    break;
+  case Gates::sxdg:
+    BaseState::add_global_phase(-M_PI / 4.);
+    break;
+  case Gates::rz:
+    BaseState::add_global_phase(-std::real(op.params[0]) / 2.);
+    break;
+  default:
+    break;
   }
 }
 
@@ -695,11 +740,9 @@ void State::apply_gate(const Operations::Op &op, RngEngine &rng, uint_t rank) {
     BaseState::qreg_.apply_h(op.qubits[0], rank);
     break;
   case Gates::sx:
-    BaseState::add_global_phase(M_PI / 4.);
     BaseState::qreg_.apply_sx(op.qubits[0], rank);
     break;
   case Gates::sxdg:
-    BaseState::add_global_phase(-M_PI / 4.);
     BaseState::qreg_.apply_sxdg(op.qubits[0], rank);
     break;
   case Gates::cx:
@@ -726,7 +769,19 @@ void State::apply_gate(const Operations::Op &op, RngEngine &rng, uint_t rank) {
                                rng.rand_int(zero, toff_branch_max), rank);
     break;
   case Gates::u1:
-    BaseState::qreg_.apply_u1(op.qubits[0], op.params[0], rng.rand(), rank);
+    pi2 = (int_t)std::round(std::real(op.params[0]) * 2.0 / M_PI);
+    if (AER::Linalg::almost_equal(std::real(op.params[0]) * 2.0 / M_PI,
+                                  (double)pi2)) {
+      pi2 = ((pi2 % 4) + 4) % 4;
+      if (pi2 == 1)
+        BaseState::qreg_.apply_s(op.qubits[0], rank);
+      else if (pi2 == 2)
+        BaseState::qreg_.apply_z(op.qubits[0], rank);
+      else if (pi2 == 3)
+        BaseState::qreg_.apply_sdag(op.qubits[0], rank);
+    } else {
+      BaseState::qreg_.apply_u1(op.qubits[0], op.params[0], rng.rand(), rank);
+    }
     break;
   case Gates::pauli:
     apply_pauli(op.qubits, op.string_params[0], rank);
@@ -740,16 +795,18 @@ void State::apply_gate(const Operations::Op &op, RngEngine &rng, uint_t rank) {
     BaseState::qreg_.apply_x(op.qubits[0], rank);
     break;
   case Gates::rz:
-    pi2 = (int_t)std::round(std::real(op.params[0]) * 2.0 / M_PI) & 3;
-    if (pi2 == 1) {
-      // S
-      BaseState::qreg_.apply_s(op.qubits[0], rank);
-    } else if (pi2 == 2) {
-      // Z
-      BaseState::qreg_.apply_z(op.qubits[0], rank);
-    } else if (pi2 == 3) {
-      // Sdg
-      BaseState::qreg_.apply_sdag(op.qubits[0], rank);
+    pi2 = (int_t)std::round(std::real(op.params[0]) * 2.0 / M_PI);
+    if (AER::Linalg::almost_equal(std::real(op.params[0]) * 2.0 / M_PI,
+                                  (double)pi2)) {
+      pi2 = ((pi2 % 4) + 4) % 4;
+      if (pi2 == 1)
+        BaseState::qreg_.apply_s(op.qubits[0], rank);
+      else if (pi2 == 2)
+        BaseState::qreg_.apply_z(op.qubits[0], rank);
+      else if (pi2 == 3)
+        BaseState::qreg_.apply_sdag(op.qubits[0], rank);
+    } else {
+      BaseState::qreg_.apply_u1(op.qubits[0], op.params[0], rng.rand(), rank);
     }
     break;
   default: // u0 or Identity
@@ -803,6 +860,10 @@ void State::apply_save_amplitudes_sq(const Operations::Op &op,
         "Invalid save_amplitudes_sq instructions (empty params).");
   }
   uint_t num_qubits = op.qubits.size();
+  if (num_qubits != BaseState::qreg_.get_n_qubits()) {
+    throw std::invalid_argument(
+        "Save amplitude square must be defined on full width of qubits.");
+  }
   rvector_t amps_sq(op.int_params.size(),
                     1.0); // Must be initialized in 1 for helper func
   for (size_t i = 0; i < op.int_params.size(); i++) {
@@ -878,7 +939,11 @@ double State::expval_pauli(const reg_t &qubits, const std::string &pauli,
   }
   auto g_norm = state_cpy.norm_estimation(
       norm_estimation_samples_, norm_estimation_repetitions_, paulis, rng);
-  double t = 2 * g_norm - phi_norm;
+  if (phi_norm <= 0.) {
+    throw std::runtime_error(
+        "Extended stabilizer norm estimation returned a non-positive norm.");
+  }
+  double t = (2 * g_norm - phi_norm) / phi_norm;
 
   if (BaseState::qreg_.get_num_states() == 1) {
     // if all ops in circuit are cliffords, return -1, 0 or 1
@@ -889,7 +954,7 @@ double State::expval_pauli(const reg_t &qubits, const std::string &pauli,
     else
       return 0.0;
   }
-  
+
   return t;
 }
 
@@ -941,6 +1006,9 @@ void State::compute_extent(const Operations::Op &op, double &xi) const {
       xi *= CHSimulator::ccx_extent;
       break;
     case Gates::u1:
+      xi *= CHSimulator::u1_extent(std::real(op.params[0]));
+      break;
+    case Gates::rz:
       xi *= CHSimulator::u1_extent(std::real(op.params[0]));
       break;
     default:
