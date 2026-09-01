@@ -380,9 +380,16 @@ void State::apply_ops(InputIterator first, InputIterator last,
 
     auto it_nonstab_begin = first + first_non_clifford;
 
-    uint_t chi = compute_chi(it_nonstab_begin, last);
-    double delta = std::pow(approximation_error_, -2);
-    BaseState::qreg_.initialize_decomposition(chi, delta);
+    // The state controller may flush a circuit incrementally. Once a
+    // non-Clifford operation has expanded the runner, preserve that sampled
+    // decomposition and evolve it instead of trying to initialize it again.
+    // Reinitialization is only valid while the runner contains its original
+    // single stabilizer state.
+    if (!BaseState::qreg_.is_decomposition_initialized()) {
+      uint_t chi = compute_chi(it_nonstab_begin, last);
+      double delta = std::pow(approximation_error_, -2);
+      BaseState::qreg_.initialize_decomposition(chi, delta);
+    }
     // Check for measurement optimisaitons
     bool measurement_opt = check_measurement_opt(first, last);
 
@@ -527,8 +534,10 @@ void State::apply_stabilizer_circuit(InputIterator first, InputIterator last,
     if (BaseState::creg().check_conditional(op)) {
       switch (op.type) {
       case Operations::OpType::gate:
-        apply_gate_global_phase(op);
-        apply_gate(op, rng, 0);
+        // apply_gate(op, rng) applies a gate to every term in an existing
+        // decomposition, and has the same effect as the old rank-zero path
+        // while the runner still contains a single stabilizer state.
+        apply_gate(op, rng);
         break;
       case Operations::OpType::reset:
         apply_reset(op.qubits, rng);

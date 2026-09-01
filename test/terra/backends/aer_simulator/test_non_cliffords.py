@@ -221,3 +221,35 @@ class TestNonCliffords(SimulatorTestCase):
         self.assertTrue(
             np.allclose(data["probabilities"], target.probabilities(), atol=0.12)
         )
+
+    def test_extended_stabilizer_checkpoints_after_decomposition(self):
+        """Clifford and non-Clifford evolution continues after state saves."""
+        backend = self._extended_stabilizer_backend()
+        circuit = QuantumCircuit(1)
+        target_circuit = QuantumCircuit(1)
+
+        circuit.h(0)
+        circuit.t(0)
+        target_circuit.h(0)
+        target_circuit.t(0)
+        first_target = Statevector(target_circuit).data
+        circuit.save_statevector(label="after_t")
+
+        circuit.h(0)
+        target_circuit.h(0)
+        second_target = Statevector(target_circuit).data
+        circuit.save_statevector(label="after_h")
+
+        circuit.p(-np.pi / 5, 0)
+        target_circuit.p(-np.pi / 5, 0)
+        third_target = Statevector(target_circuit).data
+        circuit.save_statevector(label="after_p")
+
+        result = backend.run(
+            transpile(circuit, backend, optimization_level=0), shots=1
+        ).result()
+        self.assertSuccess(result)
+        data = result.data(0)
+        self.assertTrue(np.allclose(data["after_t"].data, first_target, atol=0.08))
+        self.assertTrue(np.allclose(data["after_h"].data, second_target, atol=0.08))
+        self.assertTrue(np.allclose(data["after_p"].data, third_target, atol=0.10))

@@ -55,6 +55,7 @@ class Runner {
 private:
   uint_t n_qubits_ = 0;
   uint_t num_states_ = 0;
+  bool decomposition_initialized_ = false;
   std::vector<chstabilizer_t> states_;
   std::vector<complex_t> coefficients_;
   uint_t num_threads_;
@@ -87,6 +88,7 @@ public:
 
   uint_t get_num_states() const;
   uint_t get_n_qubits() const;
+  bool is_decomposition_initialized() const;
   bool check_omp_threshold();
 
   // Convert each state to a json object and return it.
@@ -170,21 +172,23 @@ void Runner::initialize(uint_t num_qubits) {
   coefficients_.clear();
   n_qubits_ = num_qubits;
   num_states_ = 1;
+  decomposition_initialized_ = false;
   num_threads_ = 1;
   states_ = std::vector<chstabilizer_t>(1, chstabilizer_t(num_qubits));
   coefficients_.push_back(complex_t(1., 0.));
 }
 
 void Runner::initialize_decomposition(uint_t n_states, double delta) {
+  if (decomposition_initialized_ || states_.size() > 1 ||
+      coefficients_.size() > 1) {
+    throw std::runtime_error(
+        "CHSimulator::Runner was initialized without being properly cleared "
+        "since the last experiment.");
+  }
+  decomposition_initialized_ = true;
   num_states_ = n_states;
   states_.reserve(num_states_);
   coefficients_.reserve(num_states_);
-  if (states_.size() > 1 || coefficients_.size() > 1) {
-    throw std::runtime_error(
-        std::string("CHSimulator::Runner was initialized without") +
-        std::string("being properly cleared since the last ") +
-        std::string("experiment."));
-  }
   coefficients_[0] = complex_t(1. / delta, 0.);
   chstabilizer_t base_sate(states_[0]);
   complex_t coeff(coefficients_[0]);
@@ -202,6 +206,10 @@ void Runner::initialize_omp(uint_t n_threads, uint_t threshold_rank) {
 uint_t Runner::get_num_states() const { return num_states_; }
 
 uint_t Runner::get_n_qubits() const { return n_qubits_; }
+
+bool Runner::is_decomposition_initialized() const {
+  return decomposition_initialized_;
+}
 
 bool Runner::check_omp_threshold() { return num_states_ > omp_threshold_; }
 
