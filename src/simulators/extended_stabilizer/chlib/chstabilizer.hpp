@@ -877,11 +877,10 @@ double NormEstimate(std::vector<StabilizerState> &states,
   // Norm estimate for a state |psi> = \sum_{i} c_{i}|phi_{i}>
   double xi = 0;
   unsigned L = Samples_d1.size();
-  // std::vector<double> data = (L,0.);
+  // Keep this path serial, without an OpenMP region for each sample.
   for (size_t i = 0; i < L; i++) {
     double re_eta = 0., im_eta = 0.;
     const int_t END = states.size();
-#pragma omp parallel for reduction(+ : re_eta) reduction(+ : im_eta)
     for (int_t j = 0; j < END; j++) {
       if (states[j].ScalarPart().eps != 0) {
         scalar_t amp =
@@ -910,6 +909,9 @@ ParallelNormEstimate(std::vector<StabilizerState> &states,
                      const std::vector<uint_fast64_t> &Samples_d2,
                      const std::vector<std::vector<uint_fast64_t>> &Samples,
                      int n_threads) {
+  if (n_threads <= 1 || states.size() <= 1) {
+    return NormEstimate(states, phases, Samples_d1, Samples_d2, Samples);
+  }
   double xi = 0;
   unsigned L = Samples_d1.size();
   unsigned chi = states.size();

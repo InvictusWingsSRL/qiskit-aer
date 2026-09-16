@@ -1,0 +1,8 @@
+fixes:
+  - |
+    Fixed excessive OpenMP overhead in the ``extended_stabilizer`` method's
+    norm estimation. Sample generation and norm estimation now respect
+    ``extended_stabilizer_parallel_threshold`` and use a serial path for small
+    decompositions. Single-term decompositions use their exact norm, including
+    after Pauli projections, avoiding unnecessary sampling for Clifford
+    expectation values and saved probabilities.

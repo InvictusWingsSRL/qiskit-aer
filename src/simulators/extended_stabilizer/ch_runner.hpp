@@ -414,13 +414,26 @@ void Runner::apply_ccz(uint_t control_1, uint_t control_2, uint_t target,
 
 double Runner::norm_estimation(uint_t n_samples, uint_t repetitions,
                                AER::RngEngine &rng) {
+  if (num_states_ == 1) {
+    // The CH circuit is unitary, so only the coefficient and scalar part
+    // contribute to the norm, including after a Pauli projection.
+    const auto omega = states_[0].ScalarPart();
+    return omega.eps == 0 ? 0.
+                          : std::ldexp(std::norm(coefficients_[0]), omega.p);
+  }
 
   const int_t NSAMPLES = n_samples;
   const int_t NQUBITS = n_qubits_;
+  uint_t n_threads = 1;
+#ifdef _OPENMP
+  if (num_threads_ > 1 && num_states_ > omp_threshold_) {
+    n_threads = std::min(num_threads_, num_states_);
+  }
+#endif
   std::vector<double> xi_samples(repetitions, 0.);
-  std::vector<AER::RngEngine> rngs(num_threads_);
+  std::vector<AER::RngEngine> rngs(n_threads);
   rngs[0] = rng;
-  for (uint_t i = 1; i < num_threads_; i++) {
+  for (uint_t i = 1; i < n_threads; i++) {
     rngs[i].set_seed(rng.initial_seed() + i);
   }
   for (uint_t m = 0; m < repetitions; m++) {
@@ -429,28 +442,37 @@ double Runner::norm_estimation(uint_t n_samples, uint_t repetitions,
     std::vector<std::vector<uint_t>> a(n_samples,
                                        std::vector<uint_t>(n_qubits_, 0ULL));
 
-#pragma omp parallel if (num_threads_ > 1) num_threads(num_threads_)
-    {
-      int tid = omp_get_thread_num();
-#pragma omp for
-      for (int_t l = 0; l < NSAMPLES; l++) {
-        for (int_t i = 0; i < NQUBITS; i++) {
-          for (int_t j = i; j < NQUBITS; j++) {
-            if (rngs[tid].rand() < 0.5) {
-              a[l][i] |= (1ULL << j);
-              a[l][j] |= (1ULL << i);
-            }
-          }
-          adiag_1[l] |= (a[l][i] & (1ULL << i));
-          if (rngs[tid].rand() < 0.5) {
-            adiag_2[l] |= (1ULL << i);
+    auto generate_sample = [&](int_t l, AER::RngEngine &local_rng) {
+      for (int_t i = 0; i < NQUBITS; i++) {
+        for (int_t j = i; j < NQUBITS; j++) {
+          if (local_rng.rand() < 0.5) {
+            a[l][i] |= (1ULL << j);
+            a[l][j] |= (1ULL << i);
           }
         }
+        adiag_1[l] |= (a[l][i] & (1ULL << i));
+        if (local_rng.rand() < 0.5) {
+          adiag_2[l] |= (1ULL << i);
+        }
       }
-    } // end omp parallel
-    double xi = ParallelNormEstimate(states_, coefficients_, adiag_1, adiag_2,
-                                     a, num_threads_);
-    xi_samples[m] = xi;
+    };
+
+#ifdef _OPENMP
+    if (n_threads > 1) {
+#pragma omp parallel for num_threads(n_threads)
+      for (int_t l = 0; l < NSAMPLES; l++) {
+        generate_sample(l, rngs[omp_get_thread_num()]);
+      }
+      xi_samples[m] = ParallelNormEstimate(states_, coefficients_, adiag_1,
+                                           adiag_2, a, n_threads);
+    } else
+#endif
+    {
+      for (int_t l = 0; l < NSAMPLES; l++) {
+        generate_sample(l, rngs[0]);
+      }
+      xi_samples[m] = NormEstimate(states_, coefficients_, adiag_1, adiag_2, a);
+    }
   }
   // Get median of the xi samples
   std::sort(xi_samples.begin(), xi_samples.end());
