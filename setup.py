@@ -104,7 +104,7 @@ setup(
     author_email="qiskit@us.ibm.com",
     license="Apache 2.0",
     classifiers=classifiers,
-    python_requires=">=3.7",
+    python_requires=">=3.10",
     install_requires=requirements,
     include_package_data=False,
     package_data={"qiskit_aer": ["VERSION.txt"], "qiskit_aer.library": ["*.csv"]},
