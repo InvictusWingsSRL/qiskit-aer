@@ -488,6 +488,7 @@ template <typename InputIterator>
 void State::apply_ops_parallel(InputIterator first, InputIterator last,
                                ExperimentResult &result, RngEngine &rng) {
   const int_t NUM_STATES = BaseState::qreg_.get_num_states();
+  const uint_t n_threads = BaseState::qreg_.get_parallel_threads();
 
   for (auto it = first; it != last; ++it) {
     if (it->type == Operations::OpType::gate) {
@@ -500,9 +501,7 @@ void State::apply_ops_parallel(InputIterator first, InputIterator last,
     rng_seeds[i] = rng.rand_int<size_t>(0, SIZE_MAX);
   }
 
-#pragma omp parallel for if (BaseState::qreg_.check_omp_threshold() &&         \
-                             BaseState::threads_ > 1)                          \
-    num_threads(BaseState::threads_)
+#pragma omp parallel for if (n_threads > 1) num_threads(n_threads)
   for (int_t i = 0; i < NUM_STATES; i++) {
     if (!BaseState::qreg_.check_eps(i)) {
       continue;
@@ -645,9 +644,8 @@ void State::apply_reset(const reg_t &qubits, AER::RngEngine &rng) {
     }
   }
   BaseState::qreg_.apply_pauli_projector(paulis);
-#pragma omp parallel for if (BaseState::threads_ > 1 &&                        \
-                             BaseState::qreg_.check_omp_threshold())           \
-    num_threads(BaseState::threads_)
+  const uint_t n_threads = BaseState::qreg_.get_parallel_threads();
+#pragma omp parallel for if (n_threads > 1) num_threads(n_threads)
   for (int_t i = 0; i < NUM_STATES; i++) {
     for (auto qubit : qubits) {
       if ((measure_string >> qubit) & 1ULL) {
@@ -659,6 +657,7 @@ void State::apply_reset(const reg_t &qubits, AER::RngEngine &rng) {
 
 void State::apply_gate(const Operations::Op &op, RngEngine &rng) {
   const int_t NUM_STATES = BaseState::qreg_.get_num_states();
+  const uint_t n_threads = BaseState::qreg_.get_parallel_threads();
   apply_gate_global_phase(op);
 
   if (is_non_clifford(op)) {
@@ -666,9 +665,7 @@ void State::apply_gate(const Operations::Op &op, RngEngine &rng) {
     for (int_t i = 0; i < NUM_STATES; i++) {
       rng_seeds[i] = rng.rand_int<size_t>(0, SIZE_MAX);
     }
-#pragma omp parallel for if (BaseState::threads_ > 1 &&                        \
-                             BaseState::qreg_.check_omp_threshold())           \
-    num_threads(BaseState::threads_)
+#pragma omp parallel for if (n_threads > 1) num_threads(n_threads)
     for (int_t i = 0; i < NUM_STATES; i++) {
       if (BaseState::qreg_.check_eps(i)) {
         RngEngine local_rng(rng_seeds[i]);
@@ -676,9 +673,7 @@ void State::apply_gate(const Operations::Op &op, RngEngine &rng) {
       }
     }
   } else {
-#pragma omp parallel for if (BaseState::threads_ > 1 &&                        \
-                             BaseState::qreg_.check_omp_threshold())           \
-    num_threads(BaseState::threads_)
+#pragma omp parallel for if (n_threads > 1) num_threads(n_threads)
     for (int_t i = 0; i < NUM_STATES; i++) {
       if (BaseState::qreg_.check_eps(i)) {
         apply_gate(op, rng, i);

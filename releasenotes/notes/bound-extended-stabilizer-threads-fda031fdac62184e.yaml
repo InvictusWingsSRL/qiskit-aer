@@ -1,0 +1,11 @@
+fixes:
+  - |
+    Fixed excessive OpenMP overhead in the ``extended_stabilizer`` simulator.
+    State-update teams now respect the available CPUs, the OpenMP runtime limits
+    and the caller's thread budget, and do not create nested teams inside an
+    existing parallel region. Metropolis sampling also limits its workers to
+    provide sufficient decomposition terms per worker, avoiding oversized teams
+    synchronizing at every sampling step. Norm estimation accumulates samples
+    in worker-local buffers using one parallel region per estimate instead of
+    one region per sample. Approximation accuracy, norm sample counts and
+    Metropolis mixing steps are unchanged.

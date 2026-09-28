@@ -25,6 +25,7 @@
 
 #include "core.hpp"
 #include "framework/utils.hpp"
+#include "parallel.hpp"
 
 namespace CHSimulator {
 // Clifford simulator based on the CH-form
@@ -909,17 +910,27 @@ ParallelNormEstimate(std::vector<StabilizerState> &states,
                      const std::vector<uint_fast64_t> &Samples_d2,
                      const std::vector<std::vector<uint_fast64_t>> &Samples,
                      int n_threads) {
+  n_threads = std::min<std::size_t>(parallel_threads(std::max(1, n_threads)),
+                                    states.size());
   if (n_threads <= 1 || states.size() <= 1) {
     return NormEstimate(states, phases, Samples_d1, Samples_d2, Samples);
   }
-  double xi = 0;
-  unsigned L = Samples_d1.size();
-  unsigned chi = states.size();
-  for (uint_fast64_t i = 0; i < L; i++) {
-    double re_eta = 0., im_eta = 0.;
-#pragma omp parallel for reduction(+:re_eta) reduction(+:im_eta) num_threads(n_threads)
+#ifdef _OPENMP
+  const std::size_t L = Samples_d1.size();
+  const int_t chi = states.size();
+  // Keep each stabilizer on one worker: InnerProduct lazily updates its
+  // transposed matrices. Accumulate all samples in thread-private buffers so
+  // only one parallel region is needed, rather than one region per sample.
+  std::vector<std::vector<cdouble>> partials(
+      n_threads, std::vector<cdouble>(L, cdouble(0., 0.)));
+#pragma omp parallel num_threads(n_threads)
+  {
+    auto &local = partials[omp_get_thread_num()];
+#pragma omp for schedule(static)
     for (int_t j = 0; j < chi; j++) {
-      if (states[j].ScalarPart().eps != 0) {
+      if (states[j].ScalarPart().eps == 0)
+        continue;
+      for (std::size_t i = 0; i < L; i++) {
         scalar_t amp =
             states[j].InnerProduct(Samples_d1[i], Samples_d2[i], Samples[i]);
         if (amp.eps != 0) {
@@ -929,14 +940,22 @@ ParallelNormEstimate(std::vector<StabilizerState> &states,
           double mag = pow(2, amp.p / (double)2);
           cdouble phase(RE_PHASE[amp.e], IM_PHASE[amp.e]);
           phase *= conj(phases[j]);
-          re_eta += (mag * real(phase));
-          im_eta += (mag * imag(phase));
+          local[i] += mag * phase;
         }
       }
     }
-    xi += (pow(re_eta, 2) + pow(im_eta, 2));
+  }
+  double xi = 0;
+  for (std::size_t i = 0; i < L; i++) {
+    cdouble amplitude(0., 0.);
+    for (const auto &partial : partials)
+      amplitude += partial[i];
+    xi += std::norm(amplitude);
   }
   return pow(2., states[0].NQubits()) * (xi / L);
+#else
+  return NormEstimate(states, phases, Samples_d1, Samples_d2, Samples);
+#endif
 }
 
 } // namespace CHSimulator

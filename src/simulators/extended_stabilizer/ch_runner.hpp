@@ -17,6 +17,7 @@
 
 #include "chlib/chstabilizer.hpp"
 #include "chlib/core.hpp"
+#include "chlib/parallel.hpp"
 #include "gates.hpp"
 
 #include "framework/json.hpp"
@@ -58,16 +59,17 @@ private:
   bool decomposition_initialized_ = false;
   std::vector<chstabilizer_t> states_;
   std::vector<complex_t> coefficients_;
-  uint_t num_threads_;
-  uint_t omp_threshold_;
+  uint_t num_threads_ = 1;
+  uint_t omp_threshold_ = 100;
+  static constexpr uint_t metropolis_terms_per_thread_ = 1024;
 
   bool accept_;
   complex_t old_ampsum_;
   uint_t x_string_;
   uint_t last_proposal_;
 
-  void init_metropolis(AER::RngEngine &rng);
-  void metropolis_step(AER::RngEngine &rng);
+  void init_metropolis(AER::RngEngine &rng, uint_t n_threads);
+  void metropolis_step(AER::RngEngine &rng, uint_t n_threads);
   //
 
   json_t serialize_state(uint_t rank) const;
@@ -90,6 +92,8 @@ public:
   uint_t get_n_qubits() const;
   bool is_decomposition_initialized() const;
   bool check_omp_threshold();
+  // Bound a team by the runtime, CPUs, nesting and useful work per worker.
+  uint_t get_parallel_threads(uint_t min_work_per_thread = 1) const;
 
   // Convert each state to a json object and return it.
   std::vector<std::string> serialize_decomposition() const;
@@ -213,14 +217,22 @@ bool Runner::is_decomposition_initialized() const {
 
 bool Runner::check_omp_threshold() { return num_states_ > omp_threshold_; }
 
+uint_t Runner::get_parallel_threads(uint_t min_work_per_thread) const {
+  if (num_states_ <= omp_threshold_)
+    return 1;
+  const uint_t work_threads = std::max<uint_t>(
+      1, num_states_ / std::max<uint_t>(1, min_work_per_thread));
+  return std::min<uint_t>(parallel_threads(num_threads_), work_threads);
+}
+
 //-------------------------------------------------------------------------
 // Operations on the decomposition
 //-------------------------------------------------------------------------
 
 void Runner::apply_pauli(pauli_t &P) {
   const int_t END = num_states_;
-#pragma omp parallel for if (num_states_ > omp_threshold_ && num_threads_ > 1) \
-    num_threads(num_threads_)
+  const uint_t n_threads = get_parallel_threads();
+#pragma omp parallel for if (n_threads > 1) num_threads(n_threads)
   for (int_t i = 0; i < END; i++) {
     states_[i].MeasurePauli(P);
   }
@@ -228,8 +240,8 @@ void Runner::apply_pauli(pauli_t &P) {
 
 void Runner::apply_pauli_projector(const std::vector<pauli_t> &generators) {
   const int_t END = num_states_;
-#pragma omp parallel for if (num_states_ > omp_threshold_ && num_threads_ > 1) \
-    num_threads(num_threads_)
+  const uint_t n_threads = get_parallel_threads();
+#pragma omp parallel for if (n_threads > 1) num_threads(n_threads)
   for (int_t i = 0; i < END; i++) {
     apply_pauli_projector(generators, i);
   }
@@ -424,12 +436,8 @@ double Runner::norm_estimation(uint_t n_samples, uint_t repetitions,
 
   const int_t NSAMPLES = n_samples;
   const int_t NQUBITS = n_qubits_;
-  uint_t n_threads = 1;
-#ifdef _OPENMP
-  if (num_threads_ > 1 && num_states_ > omp_threshold_) {
-    n_threads = std::min(num_threads_, num_states_);
-  }
-#endif
+  const uint_t n_threads =
+      std::min(get_parallel_threads(), std::max<uint_t>(1, n_samples));
   std::vector<double> xi_samples(repetitions, 0.);
   std::vector<AER::RngEngine> rngs(n_threads);
   rngs[0] = rng;
@@ -559,9 +567,12 @@ std::vector<double> Runner::ne_probabilities(uint_t default_samples,
 }
 
 uint_t Runner::metropolis_estimation(uint_t n_steps, AER::RngEngine &rng) {
-  init_metropolis(rng);
+  // Each step is a short reduction followed by a dependent proposal. Give
+  // every worker enough terms to amortize the synchronization at every step.
+  const uint_t n_threads = get_parallel_threads(metropolis_terms_per_thread_);
+  init_metropolis(rng, n_threads);
   for (uint_t i = 0; i < n_steps; i++) {
-    metropolis_step(rng);
+    metropolis_step(rng, n_threads);
   }
   return x_string_;
 }
@@ -570,15 +581,18 @@ std::vector<uint_t> Runner::metropolis_estimation(uint_t n_steps,
                                                   uint_t n_shots,
                                                   AER::RngEngine &rng) {
   std::vector<uint_t> shots(n_shots, zer);
+  if (shots.empty())
+    return shots;
+  const uint_t n_threads = get_parallel_threads(metropolis_terms_per_thread_);
   shots[0] = metropolis_estimation(n_steps, rng);
   for (uint_t i = 1; i < n_shots; i++) {
-    metropolis_step(rng);
+    metropolis_step(rng, n_threads);
     shots[i] = x_string_;
   }
   return shots;
 }
 
-void Runner::init_metropolis(AER::RngEngine &rng) {
+void Runner::init_metropolis(AER::RngEngine &rng, uint_t n_threads) {
   accept_ = false;
   // Random initial x_string from RngEngine
   uint_t max = (1ULL << n_qubits_) - 1;
@@ -586,9 +600,8 @@ void Runner::init_metropolis(AER::RngEngine &rng) {
   last_proposal_ = 0;
   double local_real = 0., local_imag = 0.;
   const int_t END = num_states_;
-#pragma omp parallel for if (num_states_ > omp_threshold_ && num_threads_ > 1) \
-    num_threads(num_threads_) reduction(+ : local_real)                        \
-    reduction(+ : local_imag)
+#pragma omp parallel for if (n_threads > 1) num_threads(n_threads) \
+    reduction(+ : local_real) reduction(+ : local_imag)
   for (int_t i = 0; i < END; i++) {
     scalar_t amp = states_[i].Amplitude(x_string_);
     if (amp.eps == 1) {
@@ -600,7 +613,7 @@ void Runner::init_metropolis(AER::RngEngine &rng) {
   old_ampsum_ = complex_t(local_real, local_imag);
 }
 
-void Runner::metropolis_step(AER::RngEngine &rng) {
+void Runner::metropolis_step(AER::RngEngine &rng, uint_t n_threads) {
   uint_t proposal = rng.rand(0ULL, n_qubits_);
   if (accept_) {
     x_string_ ^= (one << last_proposal_);
@@ -608,9 +621,8 @@ void Runner::metropolis_step(AER::RngEngine &rng) {
   double real_part = 0., imag_part = 0.;
   if (accept_ == 0) {
     const int_t END = num_states_;
-#pragma omp parallel for if (num_states_ > omp_threshold_ && num_threads_ > 1) \
-    num_threads(num_threads_) reduction(+ : real_part)                         \
-    reduction(+ : imag_part)
+#pragma omp parallel for if (n_threads > 1) num_threads(n_threads) \
+    reduction(+ : real_part) reduction(+ : imag_part)
     for (int_t i = 0; i < END; i++) {
       scalar_t amp = states_[i].ProposeFlip(proposal);
       if (amp.eps == 1) {
@@ -621,9 +633,8 @@ void Runner::metropolis_step(AER::RngEngine &rng) {
     }
   } else {
     const int_t END = num_states_;
-#pragma omp parallel for if (num_states_ > omp_threshold_ && num_threads_ > 1) \
-    num_threads(num_threads_) reduction(+ : real_part)                         \
-    reduction(+ : imag_part)
+#pragma omp parallel for if (n_threads > 1) num_threads(n_threads) \
+    reduction(+ : real_part) reduction(+ : imag_part)
     for (int_t i = 0; i < END; i++) {
       states_[i].AcceptFlip();
       scalar_t amp = states_[i].ProposeFlip(proposal);
@@ -677,9 +688,9 @@ complex_t Runner::amplitude(uint_t x_measure) {
   double real_part = 0., imag_part = 0.;
   // Splitting the reduction guarantees support on more OMP versions.
   const int_t END = num_states_;
-#pragma omp parallel for if (num_states_ > omp_threshold_ && num_threads_ > 1) \
-    num_threads(num_threads_) reduction(+ : real_part)                         \
-    reduction(+ : imag_part)
+  const uint_t n_threads = get_parallel_threads();
+#pragma omp parallel for if (n_threads > 1) num_threads(n_threads) \
+    reduction(+ : real_part) reduction(+ : imag_part)
   for (int_t i = 0; i < END; i++) {
     complex_t amplitude = states_[i].Amplitude(x_measure).to_complex();
     amplitude *= coefficients_[i];
@@ -735,8 +746,8 @@ inline void to_json(json_t &js, const Runner &rn) {
 std::vector<std::string> Runner::serialize_decomposition() const {
   std::vector<std::string> serialized_states(num_states_);
   const int_t END = num_states_;
-#pragma omp parallel for if (num_threads_ > 1 && num_states_ > omp_threshold_) \
-    num_threads(num_threads_)
+  const uint_t n_threads = get_parallel_threads();
+#pragma omp parallel for if (n_threads > 1) num_threads(n_threads)
   for (int_t i = 0; i < END; i++) {
     serialized_states[i] = serialize_state(i).dump();
   }
