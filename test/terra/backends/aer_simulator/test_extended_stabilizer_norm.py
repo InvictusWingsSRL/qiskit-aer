@@ -44,9 +44,7 @@ class TestExtendedStabilizerNorm(SimulatorTestCase):
                     for index, pauli in enumerate(paulis):
                         value = target.expectation_value(pauli).real
                         expected.append([value, 1.0 - value**2])
-                        circuit.save_expectation_value_variance(
-                            pauli, range(4), label=f"p{index}"
-                        )
+                        circuit.save_expectation_value_variance(pauli, range(4), label=f"p{index}")
                     circuit.save_amplitudes_squared(range(16), label="probabilities")
 
                     result = backend.run(

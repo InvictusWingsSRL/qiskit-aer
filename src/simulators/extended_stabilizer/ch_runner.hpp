@@ -713,7 +713,6 @@ double Runner::get_probability(uint_t outcome, uint_t default_samples,
   return prob;
 }
 
-
 AER::Vector<complex_t> Runner::statevector() {
   uint_t ceil = 1ULL << n_qubits_;
   AER::Vector<complex_t> svector(ceil, false);

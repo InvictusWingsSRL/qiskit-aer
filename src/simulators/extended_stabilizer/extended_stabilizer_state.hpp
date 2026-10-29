@@ -33,19 +33,12 @@ namespace ExtendedStabilizer {
 // OpSet of supported instructions
 const Operations::OpSet StateOpSet(
     // Op types
-    {
-        Operations::OpType::gate,
-        Operations::OpType::measure,
-        Operations::OpType::reset,
-        Operations::OpType::barrier,
-        Operations::OpType::roerror,
-        Operations::OpType::bfunc,
-        Operations::OpType::qerror_loc,
-        Operations::OpType::save_statevec,
-        Operations::OpType::save_amps_sq,
-        Operations::OpType::save_expval,
-        Operations::OpType::save_expval_var
-    }, 
+    {Operations::OpType::gate, Operations::OpType::measure,
+     Operations::OpType::reset, Operations::OpType::barrier,
+     Operations::OpType::roerror, Operations::OpType::bfunc,
+     Operations::OpType::qerror_loc, Operations::OpType::save_statevec,
+     Operations::OpType::save_amps_sq, Operations::OpType::save_expval,
+     Operations::OpType::save_expval_var},
     // Gates
     {"CX", "u0",  "u1",  "p",   "cx",    "cz",    "swap", "id",
      "x",  "y",   "z",   "h",   "s",     "sdg",   "sx",   "sxdg",
@@ -426,8 +419,8 @@ void State::apply_ops(InputIterator first, InputIterator last,
             break;
           case Operations::OpType::save_expval:
           case Operations::OpType::save_expval_var:
-             apply_save_expval(op, result, rng);
-             break;
+            apply_save_expval(op, result, rng);
+            break;
           default:
             throw std::invalid_argument("CH::State::apply_ops does not support "
                                         "operations of the type \'" +
@@ -965,7 +958,7 @@ double State::expval_pauli(const reg_t &qubits, const std::string &pauli,
 double State::expval_pauli(const reg_t &qubits, const std::string &pauli) {
   RngEngine rng;
   rng.set_random_seed();
-  return expval_pauli(qubits, pauli, rng)  ;
+  return expval_pauli(qubits, pauli, rng);
 }
 
 //-------------------------------------------------------------------------

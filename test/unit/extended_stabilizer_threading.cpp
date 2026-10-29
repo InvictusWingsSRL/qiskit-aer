@@ -48,10 +48,10 @@ void check_thread_limits() {
   require(parallel_threads(unlimited) == 1, "serial build requested workers");
 #endif
 
-  CHSimulator::Runner small(4);
-  small.initialize_omp(unlimited, 100);
-  small.initialize_decomposition(5, 1);
-  require(small.get_parallel_threads() == 1,
+  CHSimulator::Runner small_runner(4);
+  small_runner.initialize_omp(unlimited, 100);
+  small_runner.initialize_decomposition(5, 1);
+  require(small_runner.get_parallel_threads() == 1,
           "decomposition threshold was ignored");
   CHSimulator::Runner non_clifford(4);
   non_clifford.initialize_omp(unlimited, 100);

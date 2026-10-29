@@ -1556,15 +1556,18 @@ void AerState::transpile_ops() {
   if (buffer_.opset().contains(Operations::OpType::kraus))
     fusion_pass_.allow_kraus = true;
 
-  // Methods that must not fuse at all, whatever the config says. The other execution path,
-  // Executor::transpile_fusion() in simulators/circuit_executor.hpp, returns early for MPS with
-  // the comment "Do not allow the config to set active for MPS" - it has to, because
-  // Fusion::set_config() below does an unconditional `active = config.fusion_enable`, and
-  // Config::fusion_enable is a plain bool defaulting to true rather than an optional like every
-  // other fusion setting next to it. Without the same guard here, the `active = false` below is
-  // dead code and fusion runs for MPS anyway. That is not a small effect: fusing gates into wider
-  // unitaries makes the MPS bring more qubits together and take bigger SVDs, measured at about 7x
-  // on a 16 qubit brickwork circuit at bond dimension 128.
+  // Methods that must not fuse at all, whatever the config says. The other
+  // execution path, Executor::transpile_fusion() in
+  // simulators/circuit_executor.hpp, returns early for MPS with the comment "Do
+  // not allow the config to set active for MPS" - it has to, because
+  // Fusion::set_config() below does an unconditional `active =
+  // config.fusion_enable`, and Config::fusion_enable is a plain bool defaulting
+  // to true rather than an optional like every other fusion setting next to it.
+  // Without the same guard here, the `active = false` below is dead code and
+  // fusion runs for MPS anyway. That is not a small effect: fusing gates into
+  // wider unitaries makes the MPS bring more qubits together and take bigger
+  // SVDs, measured at about 7x on a 16 qubit brickwork circuit at bond
+  // dimension 128.
   bool fusion_disallowed = false;
 
   switch (method_) {
@@ -1599,7 +1602,8 @@ void AerState::transpile_ops() {
   }
   // Override default fusion settings with custom config
   fusion_pass_.set_config(configs_);
-  if (fusion_disallowed) fusion_pass_.active = false;
+  if (fusion_disallowed)
+    fusion_pass_.active = false;
   fusion_pass_.optimize_circuit(buffer_, noise_model_, state_->opset(),
                                 last_result_);
 

@@ -686,7 +686,8 @@ void MPS::common_apply_2_qubit_gate(
 
   MPS_Tensor left_gamma, right_gamma;
   rvector_t lambda;
-  double discarded_value = MPS_Tensor::Decompose(temp, left_gamma, lambda, right_gamma, MPS::mps_lapack_,
+  double discarded_value = MPS_Tensor::Decompose(
+      temp, left_gamma, lambda, right_gamma, MPS::mps_lapack_,
       max_bond_dimension_, truncation_threshold_);
 
   if (discarded_value > json_chop_threshold_)
@@ -818,9 +819,9 @@ void MPS::apply_multi_qubit_gate(const reg_t &qubits, const cmatrix_t &mat,
   for (uint_t col = 0; col < sidelen; ++col) {
     for (uint_t row = 0; row < sidelen; ++row) {
       if (row == col)
-        new_mat(new_vec[row], new_vec[row]) = is_diagonal ? mat(0, row) : mat(row, row);
-      else
-        new_mat(new_vec[row], new_vec[col]) = is_diagonal ? 0. : mat(row, col);
+        new_mat(new_vec[row], new_vec[row]) = is_diagonal ? mat(0, row) :
+  mat(row, row); else new_mat(new_vec[row], new_vec[col]) = is_diagonal ? 0. :
+  mat(row, col);
     }
   }
   */
@@ -831,13 +832,16 @@ void MPS::apply_multi_qubit_gate(const reg_t &qubits, const cmatrix_t &mat,
   if (is_diagonal) {
     for (uint_t col = 0; col < sidelen; ++col) {
       new_mat(0, new_vec[col]) =
-          mat.GetRows() == 1 ? mat(0, col) : mat(col, col); // this is just in case something passes a matrix
-                                                            // instead of a vector even if is_diagonal is true
+          mat.GetRows() == 1
+              ? mat(0, col)
+              : mat(col,
+                    col); // this is just in case something passes a matrix
+                          // instead of a vector even if is_diagonal is true
     }
   } else {
     for (uint_t col = 0; col < sidelen; ++col) {
       for (uint_t row = 0; row < sidelen; ++row) {
-          new_mat(new_vec[row], new_vec[col]) = mat(row, col);
+        new_mat(new_vec[row], new_vec[col]) = mat(row, col);
       }
     }
   }
@@ -1843,8 +1847,8 @@ void MPS::initialize_from_matrix(uint_t num_qubits, const cmatrix_t &mat) {
     S.clear();
     S.resize(std::min(reshaped_matrix.GetRows(), reshaped_matrix.GetColumns()));
     csvd_wrapper(reshaped_matrix, U, S, V, MPS::mps_lapack_);
-    reduce_zeros(U, S, V, get_max_bond_dimension(),
-                 get_truncation_threshold(), MPS::mps_lapack_);
+    reduce_zeros(U, S, V, get_max_bond_dimension(), get_truncation_threshold(),
+                 MPS::mps_lapack_);
 
     // step 3 - update q_reg_ with new gamma and new lambda
     //          increment number of qubits in the MPS structure

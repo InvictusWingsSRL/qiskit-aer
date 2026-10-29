@@ -12,6 +12,7 @@
 """
 AerSimulator Integration Tests
 """
+
 import numpy as np
 from ddt import ddt
 from test.terra.reference import ref_non_clifford
@@ -154,9 +155,7 @@ class TestNonCliffords(SimulatorTestCase):
                         transpile(circuit, backend, optimization_level=0), shots=1
                     ).result()
                     self.assertSuccess(result)
-                    self.assertTrue(
-                        np.allclose(result.data(0)["state"].data, target, atol=0.08)
-                    )
+                    self.assertTrue(np.allclose(result.data(0)["state"].data, target, atol=0.08))
 
     def test_extended_stabilizer_clifford_rz_global_phase(self):
         """A Clifford-valued RZ retains its gate-level global phase."""
@@ -167,9 +166,7 @@ class TestNonCliffords(SimulatorTestCase):
         target = Statevector(circuit).data
         circuit.save_statevector(label="state")
 
-        result = backend.run(
-            transpile(circuit, backend, optimization_level=0), shots=1
-        ).result()
+        result = backend.run(transpile(circuit, backend, optimization_level=0), shots=1).result()
         self.assertSuccess(result)
         self.assertTrue(np.allclose(result.data(0)["state"].data, target))
 
@@ -183,13 +180,9 @@ class TestNonCliffords(SimulatorTestCase):
         target = Statevector(circuit).data
         circuit.save_statevector(label="state")
 
-        result = backend.run(
-            transpile(circuit, backend, optimization_level=0), shots=1
-        ).result()
+        result = backend.run(transpile(circuit, backend, optimization_level=0), shots=1).result()
         self.assertSuccess(result)
-        self.assertTrue(
-            np.allclose(result.data(0)["state"].data, target, atol=0.08)
-        )
+        self.assertTrue(np.allclose(result.data(0)["state"].data, target, atol=0.08))
 
     def test_extended_stabilizer_nonclifford_save_instructions(self):
         """Non-Clifford saves are exposed and normalized consistently."""
@@ -207,20 +200,12 @@ class TestNonCliffords(SimulatorTestCase):
         circuit.save_expectation_value_variance(Pauli("Z"), [0], label="z")
         circuit.save_amplitudes_squared([0, 1], label="probabilities")
 
-        result = backend.run(
-            transpile(circuit, backend, optimization_level=0), shots=1
-        ).result()
+        result = backend.run(transpile(circuit, backend, optimization_level=0), shots=1).result()
         self.assertSuccess(result)
         data = result.data(0)
         self.assertAlmostEqual(data["identity"], 1.0, delta=0.08)
-        self.assertTrue(
-            np.allclose(
-                data["z"], [target_z, 1.0 - target_z**2], atol=0.12
-            )
-        )
-        self.assertTrue(
-            np.allclose(data["probabilities"], target.probabilities(), atol=0.12)
-        )
+        self.assertTrue(np.allclose(data["z"], [target_z, 1.0 - target_z**2], atol=0.12))
+        self.assertTrue(np.allclose(data["probabilities"], target.probabilities(), atol=0.12))
 
     def test_extended_stabilizer_checkpoints_after_decomposition(self):
         """Clifford and non-Clifford evolution continues after state saves."""
@@ -245,9 +230,7 @@ class TestNonCliffords(SimulatorTestCase):
         third_target = Statevector(target_circuit).data
         circuit.save_statevector(label="after_p")
 
-        result = backend.run(
-            transpile(circuit, backend, optimization_level=0), shots=1
-        ).result()
+        result = backend.run(transpile(circuit, backend, optimization_level=0), shots=1).result()
         self.assertSuccess(result)
         data = result.data(0)
         self.assertTrue(np.allclose(data["after_t"].data, first_target, atol=0.08))

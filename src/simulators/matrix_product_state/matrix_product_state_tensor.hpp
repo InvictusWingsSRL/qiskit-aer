@@ -109,7 +109,6 @@ public:
 
   static double get_chop_threshold() { return chop_threshold_; }
 
-
   //------------------------------------------------------------------
   // function name: get_dim
   // Description: Get the dimension of the physical index of the tensor
