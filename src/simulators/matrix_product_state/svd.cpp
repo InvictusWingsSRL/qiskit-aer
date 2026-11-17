@@ -314,10 +314,10 @@ status csvd(cmatrix_t &A, cmatrix_t &U, rvector_t &S, cmatrix_t &V) {
       bool jump = false;
       for (l = k; l >= 0; l--) {
 
-        if (std::abs(t[l]) < eps) {
+        if (std::abs(t[l]) <= eps) {
           jump = true;
           break;
-        } else if (std::abs(S[l - 1]) < eps) {
+        } else if (std::abs(S[l - 1]) <= eps) {
           break;
         }
       }
@@ -330,7 +330,7 @@ status csvd(cmatrix_t &A, cmatrix_t &U, rvector_t &S, cmatrix_t &V) {
           f = sn * t[i];
           t[i] = cs * t[i];
 
-          if (std::abs(f) < eps) {
+          if (std::abs(f) <= eps) {
             break;
           }
           h = S[i];

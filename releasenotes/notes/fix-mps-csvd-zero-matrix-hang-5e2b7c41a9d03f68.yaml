@@ -1,0 +1,9 @@
+fixes:
+  - |
+    Fixed the ``matrix_product_state`` simulator hanging forever in its
+    built-in SVD (``csvd``) when a bond's matrix was zero. The convergence
+    threshold scales with the matrix norm, so it was zero for a zero matrix,
+    and the strict comparisons against it never succeeded. The comparisons now
+    accept values equal to the threshold, so a zero matrix converges at once.
+    Noisy simulations with Kraus channels could reach such a matrix while a
+    measurement or a channel renormalized the state.
