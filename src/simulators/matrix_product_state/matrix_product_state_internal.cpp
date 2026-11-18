@@ -756,6 +756,8 @@ void MPS::apply_3_qubit_gate(const reg_t &qubits, Gates gate_type,
   // We convert the matrix back into a 3-qubit MPS structure
   MPS sub_MPS;
   sub_MPS.copy_settings(*this);
+  // Its tensors are written back into this MPS: within its bond limit
+  sub_MPS.copy_truncation_settings(*this);
   sub_MPS.initialize_from_matrix(qubits.size(), state_mat);
 
   // copy the 3-qubit MPS back to the corresponding positions in the original
@@ -860,6 +862,8 @@ void MPS::apply_matrix_to_target_qubits(const reg_t &target_qubits,
   // We convert the matrix back into an MPS structure
   MPS sub_MPS;
   sub_MPS.copy_settings(*this);
+  // Its tensors are written back into this MPS: within its bond limit
+  sub_MPS.copy_truncation_settings(*this);
   sub_MPS.initialize_from_matrix(num_qubits, state_mat);
 
   if (num_qubits == num_qubits_) {
@@ -898,12 +902,53 @@ void MPS::apply_kraus(const reg_t &qubits, const std::vector<cmatrix_t> &kmats,
   reg_t internal_qubits = get_internal_qubits(qubits);
   apply_kraus_internal(internal_qubits, kmats, rng);
 }
-void MPS::apply_kraus_internal(const reg_t &qubits,
+reg_t MPS::bring_qubits_together(const reg_t &qubits) {
+  if (qubits.size() < 2)
+    return qubits;
+  if (qubits.size() == 2) {
+    // As apply_2_qubit_gate moves them
+    uint_t low = std::min(qubits[0], qubits[1]);
+    const uint_t high = std::max(qubits[0], qubits[1]);
+    if (mps_swap_direction_ == MPS_swap_direction::SWAP_LEFT) {
+      change_position(high, low + 1);
+    } else {
+      change_position(low, high - 1);
+      low = high - 1;
+    }
+    return qubits[0] < qubits[1] ? reg_t{low, low + 1} : reg_t{low + 1, low};
+  }
+  // As apply_multi_qubit_gate moves them
+  if (is_ordered(qubits))
+    return qubits;
+  reg_t sorted_indices, centralized_qubits;
+  find_centralized_indices(qubits, sorted_indices, centralized_qubits);
+  move_qubits_to_centralized_indices(sorted_indices, centralized_qubits);
+  // The qubit that was at sorted_indices[i] is now at centralized_qubits[i]
+  reg_t moved(qubits.size());
+  for (uint_t i = 0; i < qubits.size(); i++) {
+    const auto position = std::lower_bound(sorted_indices.begin(),
+                                           sorted_indices.end(), qubits[i]) -
+                          sorted_indices.begin();
+    moved[i] = centralized_qubits[position];
+  }
+  return moved;
+}
+
+void MPS::apply_kraus_internal(const reg_t &original_qubits,
                                const std::vector<cmatrix_t> &kmats,
                                RngEngine &rng) {
   // Check edge case for empty Kraus set (this shouldn't happen)
   if (kmats.empty())
     return; // end function early
+
+  // The qubits are moved next to each other first, and the operator is then
+  // weighed and applied on that state. Moving them can truncate the state (a
+  // bond limit, the truncation threshold). Weighing the operators on the state
+  // before the move, as was done on a copy, could then choose one that the
+  // moved state gives no weight at all: under a bond limit of 2, two Bell
+  // pairs on qubits (0,1) and (2,3) with damping on qubits 0 and 2 were left
+  // as a zero state, whose renormalization crashed.
+  const reg_t qubits = bring_qubits_together(original_qubits);
   // Choose a real in [0, 1) to choose the applied kraus operator once
   // the accumulated probability is greater than r.
   // We know that the Kraus noise must be normalized
@@ -1902,6 +1947,8 @@ void MPS::initialize_component_internal(const reg_t &qubits,
   reset_internal(new_qubits, rng);
   MPS qubits_mps;
   qubits_mps.copy_settings(*this);
+  // Its tensors are written back into this MPS: within its bond limit
+  qubits_mps.copy_truncation_settings(*this);
   qubits_mps.initialize_from_matrix(num_qubits, mat);
   for (uint_t i = first; i <= last; i++) {
     q_reg_[i] = qubits_mps.q_reg_[i - first];

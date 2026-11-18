@@ -17,7 +17,19 @@ fixes:
     MPS in the process, and simulators configured on different threads raced
     on them. Each MPS now has its own, which the temporary copies it makes of
     itself inherit. The truncation threshold and the bond limit are not
-    inherited: a temporary represents the state as it is, so answering a query
-    never truncates.
+    inherited by a copy made to answer a query: it represents the state as it
+    is, so answering a query never truncates. An MPS whose tensors are
+    written back into the state (a gate on three or more qubits, initialized
+    qubits) does take them, so such a gate stays within the bond limit.
     The debug log (``mps_log_data``) is still one stream for the process, now
     written under a lock.
+  - |
+    Fixed a Kraus operation of the ``matrix_product_state`` simulator on
+    qubits that are not next to each other when the state is truncated (a
+    bond limit, or the truncation threshold). The Kraus operators were weighed
+    on the state before the qubits were moved together, and one was then
+    applied to the state after the move, which the truncation had changed. An
+    operator could be chosen that the moved state gave no weight, leaving a
+    zero state (two Bell pairs on qubits (0,1) and (2,3) under a bond limit of
+    2, with amplitude damping on qubits 0 and 2). The qubits are now moved
+    first, and the operators are weighed and applied on the same state.

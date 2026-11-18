@@ -364,6 +364,9 @@ public:
   // qubits (0,1) and (2,3) under a bond limit of 2: the marginal of qubits
   // (0,2) came out as [0.5, 0, 0.5, 0]). A temporary keeps the defaults, no
   // bond limit and a threshold of 1e-16.
+  // An MPS built to be written back into its owner (the tensors of a gate on
+  // three or more qubits, of initialized qubits) is part of the simulated
+  // state and takes those two as well, with copy_truncation_settings.
   void copy_settings(const MPS &other) {
     omp_threads_ = other.omp_threads_;
     omp_threshold_ = other.omp_threshold_;
@@ -373,6 +376,11 @@ public:
     mps_log_data_ = other.mps_log_data_;
     mps_swap_direction_ = other.mps_swap_direction_;
     mps_lapack_ = other.mps_lapack_;
+  }
+
+  void copy_truncation_settings(const MPS &other) {
+    max_bond_dimension_ = other.max_bond_dimension_;
+    truncation_threshold_ = other.truncation_threshold_;
   }
 
   //----------------------------------------------------------------
@@ -577,6 +585,11 @@ private:
   // Returns: none.
   //----------------------------------------------------------------
   void change_position(uint_t src, uint_t dst);
+
+  // Moves the qubits at the given positions next to each other, as applying
+  // an operator on them does, and returns their positions afterwards, in the
+  // same order. Applying an operator at the returned positions moves nothing.
+  reg_t bring_qubits_together(const reg_t &qubits);
 
   uint_t num_qubits_;
   std::vector<MPS_Tensor> q_reg_;
