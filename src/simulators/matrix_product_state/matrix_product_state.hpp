@@ -334,32 +334,32 @@ void State::set_config(const Config &config) {
     qreg_.set_max_bond_dimension(UINT64_MAX);
 
   // Set threshold for truncating snapshots
-  MPS::set_json_chop_threshold(config.chop_threshold);
+  qreg_.set_json_chop_threshold(config.chop_threshold);
 
   // Set OMP num threshold
-  MPS::set_omp_threshold(config.mps_parallel_threshold);
+  qreg_.set_omp_threshold(config.mps_parallel_threshold);
 
   // Set OMP threads
-  MPS::set_omp_threads(config.mps_omp_threads);
+  qreg_.set_omp_threads(config.mps_omp_threads);
 
   // Set the algorithm for sample measure
   if (config.mps_sample_measure_algorithm.compare("mps_probabilities") == 0)
-    MPS::set_sample_measure_alg(Sample_measure_alg::PROB);
+    qreg_.set_sample_measure_alg(Sample_measure_alg::PROB);
   else
-    MPS::set_sample_measure_alg(Sample_measure_alg::APPLY_MEASURE);
+    qreg_.set_sample_measure_alg(Sample_measure_alg::APPLY_MEASURE);
 
   // Set mps_log_data
-  MPS::set_mps_log_data(config.mps_log_data);
+  qreg_.set_mps_log_data(config.mps_log_data);
 
   // Set the direction for the internal swaps
   std::string direction;
   if (config.mps_swap_direction.compare("mps_swap_right") == 0)
-    MPS::set_mps_swap_direction(MPS_swap_direction::SWAP_RIGHT);
+    qreg_.set_mps_swap_direction(MPS_swap_direction::SWAP_RIGHT);
   else
-    MPS::set_mps_swap_direction(MPS_swap_direction::SWAP_LEFT);
+    qreg_.set_mps_swap_direction(MPS_swap_direction::SWAP_LEFT);
 
   // Set LAPACK SVD
-  MPS::set_mps_lapack_svd(config.mps_lapack);
+  qreg_.set_mps_lapack_svd(config.mps_lapack);
 }
 
 void State::add_metadata(ExperimentResult &result) const {
@@ -367,18 +367,19 @@ void State::add_metadata(ExperimentResult &result) const {
                       "matrix_product_state_truncation_threshold");
   result.metadata.add(qreg_.get_max_bond_dimension(),
                       "matrix_product_state_max_bond_dimension");
-  result.metadata.add(MPS::get_sample_measure_alg(),
+  result.metadata.add(qreg_.get_sample_measure_alg(),
                       "matrix_product_state_sample_measure_algorithm");
-  if (MPS::get_mps_log_data())
-    result.metadata.add("{" + MPS::output_log() + "}", "MPS_log_data");
-  result.metadata.add(MPS::get_mps_lapack_svd(), "matrix_product_state_lapack");
+  if (qreg_.get_mps_log_data())
+    result.metadata.add("{" + qreg_.output_log() + "}", "MPS_log_data");
+  result.metadata.add(qreg_.get_mps_lapack_svd(),
+                      "matrix_product_state_lapack");
 }
 
 void State::output_bond_dimensions(const Operations::Op &op) const {
-  MPS::print_to_log("I", instruction_number, ":", op.name, " on qubits ",
-                    op.qubits[0]);
+  qreg_.print_to_log("I", instruction_number, ":", op.name, " on qubits ",
+                     op.qubits[0]);
   for (uint_t index = 1; index < op.qubits.size(); index++) {
-    MPS::print_to_log(",", op.qubits[index]);
+    qreg_.print_to_log(",", op.qubits[index]);
   }
   qreg_.print_bond_dimensions();
   instruction_number++;
@@ -461,7 +462,7 @@ void State::apply_op(const Operations::Op &op, ExperimentResult &result,
     // qreg_.print(std::cout);
     //  print out bond dimensions only if they may have changed since previous
     //  print
-    if (MPS::get_mps_log_data() &&
+    if (qreg_.get_mps_log_data() &&
         (op.type == OpType::gate || op.type == OpType::measure ||
          op.type == OpType::initialize || op.type == OpType::reset ||
          op.type == OpType::matrix) &&
@@ -500,7 +501,7 @@ void State::apply_save_probs(const Operations::Op &op,
   if (op.type == OpType::save_probs_ket) {
     result.save_data_average(
         creg(), op.string_params[0],
-        Utils::vec2ket(probs, MPS::get_json_chop_threshold(), 16), op.type,
+        Utils::vec2ket(probs, qreg_.get_json_chop_threshold(), 16), op.type,
         op.save_type);
   } else {
     result.save_data_average(creg(), op.string_params[0], std::move(probs),
@@ -758,7 +759,7 @@ std::vector<SampleVector> State::sample_measure(const reg_t &qubits,
   // The parameters used below are based on experimentation.
   // The user can override this by setting the parameter
   // "mps_sample_measure_algorithm"
-  if (MPS::get_sample_measure_alg() == Sample_measure_alg::PROB &&
+  if (qreg_.get_sample_measure_alg() == Sample_measure_alg::PROB &&
       qubits.size() == qreg_.num_qubits()) {
     return sample_measure_all(shots, rng);
   }

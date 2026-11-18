@@ -1,0 +1,21 @@
+fixes:
+  - |
+    Fixed the ``matrix_product_state`` simulator leaving part of the chain
+    stale after a Kraus operation on qubits that are not next to each other.
+    Applying the operator moves the qubits together, but the tensors were then
+    renormalized outwards from the positions the qubits had before, so the
+    tensors in between kept their old values. Outcome probabilities were still
+    right, while an expectation value on a qubit in between was wrong: on a
+    six-qubit GHZ state with a two-qubit Kraus error on qubits 0 and 5,
+    ``<Z>`` of qubits 1 to 4 came out as 0. The renormalization now starts from
+    where the qubits are after the operator is applied.
+  - |
+    The ``matrix_product_state`` settings other than the truncation threshold
+    and the bond limit (OpenMP threads and threshold, the sample-measure
+    algorithm, the chop threshold, logging, the swap direction and the LAPACK
+    switch) were static, so the last simulator configured set them for every
+    MPS in the process, and simulators configured on different threads raced
+    on them. Each MPS now has its own, which the temporary copies it makes of
+    itself inherit, including the truncation threshold and the bond limit.
+    The debug log (``mps_log_data``) is still one stream for the process, now
+    written under a lock.

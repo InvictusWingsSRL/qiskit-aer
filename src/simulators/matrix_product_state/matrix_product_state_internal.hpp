@@ -16,6 +16,7 @@
 #define _aer_matrix_product_state_hpp_
 
 #include <cstdarg>
+#include <mutex>
 
 #include "framework/json.hpp"
 #include "framework/operations.hpp"
@@ -120,26 +121,34 @@ public:
 
   bool empty() const { return (num_qubits_ == 0); }
 
-  // the following 3 static methods are used as a reporting mechanism
-  // for MPS debug data
-  static void clear_log() { logging_str_.clear(); }
+  // the following 3 methods are used as a reporting mechanism
+  // for MPS debug data. Whether an MPS logs is its own setting
+  // (mps_log_data_); the log itself is one stream for the process, which the
+  // temporary copies an MPS makes of itself write to as well.
+  static void clear_log() {
+    const std::lock_guard<std::mutex> lock(logging_mutex_);
+    logging_str_.clear();
+  }
 
-  static void print_to_log() { // Base function for recursive function
+  void print_to_log() const { // Base function for recursive function
   }
 
   template <typename T, typename... Targs>
-  static void print_to_log(const T &value, const Targs &...Fargs) {
+  void print_to_log(const T &value, const Targs &...Fargs) const {
     if (mps_log_data_) {
-      logging_str_ << value;
-      MPS::print_to_log(Fargs...); // recursive call
+      {
+        const std::lock_guard<std::mutex> lock(logging_mutex_);
+        logging_str_ << value;
+      }
+      print_to_log(Fargs...); // recursive call
     }
   }
 
-  static std::string output_log() {
-    if (mps_log_data_)
-      return logging_str_.str();
-    else
+  std::string output_log() const {
+    if (!mps_log_data_)
       return "";
+    const std::lock_guard<std::mutex> lock(logging_mutex_);
+    return logging_str_.str();
   }
 
   //----------------------------------------------------------------
@@ -299,53 +308,67 @@ public:
     truncation_threshold_ = truncation_threshold;
   }
 
-  static void set_omp_threads(uint_t threads) {
+  void set_omp_threads(uint_t threads) {
     if (threads > 0)
       omp_threads_ = threads;
   }
-  static void set_omp_threshold(uint_t omp_qubit_threshold) {
+  void set_omp_threshold(uint_t omp_qubit_threshold) {
     if (omp_qubit_threshold > 0)
       omp_threshold_ = omp_qubit_threshold;
   }
-  static void set_json_chop_threshold(double json_chop_threshold) {
+  void set_json_chop_threshold(double json_chop_threshold) {
     json_chop_threshold_ = json_chop_threshold;
   }
 
-  static void set_sample_measure_alg(Sample_measure_alg alg) {
+  void set_sample_measure_alg(Sample_measure_alg alg) {
     sample_measure_alg_ = alg;
   }
 
-  static void set_enable_gate_opt(bool enable_gate_opt) {
+  void set_enable_gate_opt(bool enable_gate_opt) {
     enable_gate_opt_ = enable_gate_opt;
   }
 
-  static void set_mps_log_data(bool mps_log_data) {
-    mps_log_data_ = mps_log_data;
-  }
+  void set_mps_log_data(bool mps_log_data) { mps_log_data_ = mps_log_data; }
 
-  static void set_mps_swap_direction(MPS_swap_direction direction) {
+  void set_mps_swap_direction(MPS_swap_direction direction) {
     mps_swap_direction_ = direction;
   }
 
-  static void set_mps_lapack_svd(bool mps_lapack) { mps_lapack_ = mps_lapack; }
+  void set_mps_lapack_svd(bool mps_lapack) { mps_lapack_ = mps_lapack; }
 
   uint_t get_max_bond_dimension() const { return max_bond_dimension_; }
   double get_truncation_threshold() const { return truncation_threshold_; }
 
-  static uint_t get_omp_threads() { return omp_threads_; }
-  static uint_t get_omp_threshold() { return omp_threshold_; }
-  static double get_json_chop_threshold() { return json_chop_threshold_; }
-  static Sample_measure_alg get_sample_measure_alg() {
+  uint_t get_omp_threads() const { return omp_threads_; }
+  uint_t get_omp_threshold() const { return omp_threshold_; }
+  double get_json_chop_threshold() const { return json_chop_threshold_; }
+  Sample_measure_alg get_sample_measure_alg() const {
     return sample_measure_alg_;
   }
 
-  static bool get_enable_gate_opt() { return enable_gate_opt_; }
+  bool get_enable_gate_opt() const { return enable_gate_opt_; }
 
-  static bool get_mps_log_data() { return mps_log_data_; }
+  bool get_mps_log_data() const { return mps_log_data_; }
 
-  static bool get_mps_lapack_svd() { return mps_lapack_; }
+  bool get_mps_lapack_svd() const { return mps_lapack_; }
 
-  static MPS_swap_direction get_swap_direction() { return mps_swap_direction_; }
+  MPS_swap_direction get_swap_direction() const { return mps_swap_direction_; }
+
+  // The settings above belong to each MPS. An MPS that another one builds for
+  // itself (a copy to measure or contract, a sub-MPS to write back) takes them
+  // from its owner with this.
+  void copy_settings(const MPS &other) {
+    max_bond_dimension_ = other.max_bond_dimension_;
+    truncation_threshold_ = other.truncation_threshold_;
+    omp_threads_ = other.omp_threads_;
+    omp_threshold_ = other.omp_threshold_;
+    sample_measure_alg_ = other.sample_measure_alg_;
+    json_chop_threshold_ = other.json_chop_threshold_;
+    enable_gate_opt_ = other.enable_gate_opt_;
+    mps_log_data_ = other.mps_log_data_;
+    mps_swap_direction_ = other.mps_swap_direction_;
+    mps_lapack_ = other.mps_lapack_;
+  }
 
   //----------------------------------------------------------------
   // Function name: norm
@@ -404,15 +427,15 @@ private:
                            bool swap_gate = false);
   void print_to_log_internal_swap(uint_t qubit0, uint_t qubit1) const;
 
-  void apply_2_qubit_gate(uint_t index_A, uint_t index_B, Gates gate_type,
-                          const cmatrix_t &mat, bool is_diagonal = false);
+  uint_t apply_2_qubit_gate(uint_t index_A, uint_t index_B, Gates gate_type,
+                            const cmatrix_t &mat, bool is_diagonal = false);
   void common_apply_2_qubit_gate(uint_t index_A, Gates gate_type,
                                  const cmatrix_t &mat, bool swapped,
                                  bool is_diagonal = false);
   void apply_3_qubit_gate(const reg_t &qubits, Gates gate_type,
                           const cmatrix_t &mat, bool is_diagonal = false);
-  void apply_matrix_internal(const reg_t &qubits, const cmatrix_t &mat,
-                             bool is_diagonal = false);
+  uint_t apply_matrix_internal(const reg_t &qubits, const cmatrix_t &mat,
+                               bool is_diagonal = false);
 
   // Certain local operations need to be propagated to the neighboring qubits.
   // Such operations include apply_measure and apply_kraus
@@ -420,17 +443,17 @@ private:
                                        uint_t next_measured_qubit);
 
   // apply_matrix for more than 2 qubits
-  void apply_multi_qubit_gate(const reg_t &qubits, const cmatrix_t &mat,
-                              bool is_diagonal = false);
+  uint_t apply_multi_qubit_gate(const reg_t &qubits, const cmatrix_t &mat,
+                                bool is_diagonal = false);
 
   void apply_kraus_internal(const reg_t &qubits,
                             const std::vector<cmatrix_t> &kmats,
                             RngEngine &rng);
 
   // The following two are helper functions for apply_multi_qubit_gate
-  void apply_unordered_multi_qubit_gate(const reg_t &qubits,
-                                        const cmatrix_t &mat,
-                                        bool is_diagonal = false);
+  uint_t apply_unordered_multi_qubit_gate(const reg_t &qubits,
+                                          const cmatrix_t &mat,
+                                          bool is_diagonal = false);
   void apply_matrix_to_target_qubits(const reg_t &target_qubits,
                                      const cmatrix_t &mat,
                                      bool is_diagonal = false);
@@ -570,19 +593,23 @@ private:
   uint_t max_bond_dimension_ = UINT64_MAX;
   double truncation_threshold_ = 1e-16;
 
-  static uint_t omp_threads_; // Disable multithreading by default
-  static uint_t
-      omp_threshold_; // Qubit threshold for multithreading when enabled
-  static Sample_measure_alg
-      sample_measure_alg_; // Algorithm for computing sample_measure
+  // Each MPS has its own settings: as statics, the last simulator configured
+  // set them for every MPS of the process, and simulators configured on
+  // different threads raced on them.
+  uint_t omp_threads_ = 1;    // Disable multithreading by default
+  uint_t omp_threshold_ = 14; // Qubit threshold for multithreading when enabled
+  // Algorithm for computing sample_measure
+  Sample_measure_alg sample_measure_alg_ = Sample_measure_alg::HEURISTIC;
 
-  static double json_chop_threshold_; // Threshold for choping small values
+  double json_chop_threshold_ = 1E-8; // Threshold for choping small values
                                       // in JSON serialization
-  static bool enable_gate_opt_;       // allow optimizations on gates
+  bool enable_gate_opt_ = false;      // allow optimizations on gates
+  bool mps_log_data_ = false;
+  MPS_swap_direction mps_swap_direction_ = MPS_swap_direction::SWAP_LEFT;
+  bool mps_lapack_ = false;
+
   static std::stringstream logging_str_;
-  static bool mps_log_data_;
-  static MPS_swap_direction mps_swap_direction_;
-  static bool mps_lapack_;
+  static std::mutex logging_mutex_;
 };
 
 inline std::ostream &operator<<(std::ostream &out, const rvector_t &vec) {

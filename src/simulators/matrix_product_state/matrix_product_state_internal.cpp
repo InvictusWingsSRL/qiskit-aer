@@ -35,16 +35,8 @@ static const cmatrix_t zero_measure =
     AER::Utils::make_matrix<complex_t>({{{1, 0}, {0, 0}}, {{0, 0}, {0, 0}}});
 static const cmatrix_t one_measure =
     AER::Utils::make_matrix<complex_t>({{{0, 0}, {0, 0}}, {{0, 0}, {1, 0}}});
-uint_t MPS::omp_threads_ = 1;
-uint_t MPS::omp_threshold_ = 14;
-enum Sample_measure_alg MPS::sample_measure_alg_ =
-    Sample_measure_alg::HEURISTIC;
-enum MPS_swap_direction MPS::mps_swap_direction_ =
-    MPS_swap_direction::SWAP_LEFT;
-double MPS::json_chop_threshold_ = 1E-8;
 std::stringstream MPS::logging_str_;
-bool MPS::mps_log_data_ = 0;
-bool MPS::mps_lapack_ = false;
+std::mutex MPS::logging_mutex_;
 
 //------------------------------------------------------------------------
 // local function declarations
@@ -130,7 +122,8 @@ uint_t permute_qubits(const reg_t &input_qubits, uint_t index,
 // Output: the statevector in reverse order
 //----------------------------------------------------------------
 template <class vec_t>
-vec_t reverse_all_bits(const vec_t &statevector, uint_t num_qubits);
+vec_t reverse_all_bits(const vec_t &statevector, uint_t num_qubits,
+                       uint_t omp_threads, uint_t omp_threshold);
 
 // with 5 qubits, the number 2 in binary is 00010,
 // when reversed it is 01000, which is the number 8
@@ -141,7 +134,8 @@ std::vector<uint_t> calc_new_indices(const reg_t &indices);
 // The following two functions are helper functions used by
 // initialize_from_statevector
 cmatrix_t reshape_matrix(const cmatrix_t &input_matrix);
-cmatrix_t mul_matrix_by_lambda(const cmatrix_t &mat, const rvector_t &lambda);
+cmatrix_t mul_matrix_by_lambda(const cmatrix_t &mat, const rvector_t &lambda,
+                               uint_t omp_threads);
 
 std::string sort_paulis_by_qubits(const std::string &paulis,
                                   const reg_t &qubits);
@@ -299,14 +293,14 @@ uint_t reverse_bits(uint_t num, uint_t len) {
 }
 
 template <class vec_t>
-vec_t reverse_all_bits(const vec_t &statevector, uint_t num_qubits) {
+vec_t reverse_all_bits(const vec_t &statevector, uint_t num_qubits,
+                       uint_t omp_threads, uint_t omp_threshold) {
   uint_t length = statevector.size(); // length = pow(2, num_qubits_)
   vec_t output_vector;
   output_vector.resize(length);
 
-#pragma omp parallel for if (length > MPS::get_omp_threshold() &&              \
-                             MPS::get_omp_threads() > 1)                       \
-    num_threads(MPS::get_omp_threads())
+#pragma omp parallel for if (length > omp_threshold && omp_threads > 1)        \
+    num_threads(omp_threads)
   for (int_t i = 0; i < static_cast<int_t>(length); i++) {
     output_vector[i] = statevector[reverse_bits(i, num_qubits)];
   }
@@ -324,7 +318,8 @@ std::vector<uint_t> calc_new_indices(const reg_t &indices) {
   return new_indices;
 }
 
-cmatrix_t mul_matrix_by_lambda(const cmatrix_t &mat, const rvector_t &lambda) {
+cmatrix_t mul_matrix_by_lambda(const cmatrix_t &mat, const rvector_t &lambda,
+                               uint_t omp_threads) {
   if (lambda == rvector_t{1.0})
     return mat;
   cmatrix_t res_mat(mat);
@@ -333,12 +328,11 @@ cmatrix_t mul_matrix_by_lambda(const cmatrix_t &mat, const rvector_t &lambda) {
 #ifdef _WIN32
 #pragma omp parallel for if (num_rows * num_cols >                             \
                                  MPS_Tensor::MATRIX_OMP_THRESHOLD &&           \
-                             MPS::get_omp_threads() > 1)                       \
-    num_threads(MPS::get_omp_threads())
+                             omp_threads > 1) num_threads(omp_threads)
 #else
 #pragma omp parallel for collapse(                                             \
     2) if (num_rows * num_cols > MPS_Tensor::MATRIX_OMP_THRESHOLD &&           \
-           MPS::get_omp_threads() > 1) num_threads(MPS::get_omp_threads())
+           omp_threads > 1) num_threads(omp_threads)
 #endif
   for (int_t row = 0; row < static_cast<int_t>(num_rows); row++) {
     for (int_t col = 0; col < static_cast<int_t>(num_cols); col++) {
@@ -424,6 +418,7 @@ void MPS::initialize(const MPS &other) {
     lambda_reg_ = other.lambda_reg_;
     qubit_ordering_.order_ = other.qubit_ordering_.order_;
     qubit_ordering_.location_ = other.qubit_ordering_.location_;
+    copy_settings(other);
   }
 }
 
@@ -608,8 +603,8 @@ void MPS::print_bond_dimensions() const {
 //    reshape_V_after_SVD), the diagonal of S becomes the Lambda-vector in
 //    between A and B.
 //-------------------------------------------------------------------------
-void MPS::apply_2_qubit_gate(uint_t index_A, uint_t index_B, Gates gate_type,
-                             const cmatrix_t &mat, bool is_diagonal) {
+uint_t MPS::apply_2_qubit_gate(uint_t index_A, uint_t index_B, Gates gate_type,
+                               const cmatrix_t &mat, bool is_diagonal) {
   // We first move the two qubits to be in consecutive positions
   // By default, the right qubit is moved to the position after the left qubit.
   // However, the user can choose to move the left qubit to be in the position
@@ -637,6 +632,7 @@ void MPS::apply_2_qubit_gate(uint_t index_A, uint_t index_B, Gates gate_type,
     low_qubit = high_qubit - 1;
   }
   common_apply_2_qubit_gate(low_qubit, gate_type, mat, swapped, is_diagonal);
+  return low_qubit;
 }
 
 void MPS::common_apply_2_qubit_gate(
@@ -687,12 +683,12 @@ void MPS::common_apply_2_qubit_gate(
 
   MPS_Tensor left_gamma, right_gamma;
   rvector_t lambda;
-  double discarded_value = MPS_Tensor::Decompose(
-      temp, left_gamma, lambda, right_gamma, MPS::mps_lapack_,
-      max_bond_dimension_, truncation_threshold_);
+  double discarded_value =
+      MPS_Tensor::Decompose(temp, left_gamma, lambda, right_gamma, mps_lapack_,
+                            max_bond_dimension_, truncation_threshold_);
 
   if (discarded_value > json_chop_threshold_)
-    MPS::print_to_log("discarded_value=", discarded_value, ", ");
+    print_to_log("discarded_value=", discarded_value, ", ");
 
   if (A != 0)
     left_gamma.div_Gamma_by_left_Lambda(lambda_reg_[A - 1]);
@@ -759,6 +755,7 @@ void MPS::apply_3_qubit_gate(const reg_t &qubits, Gates gate_type,
 
   // We convert the matrix back into a 3-qubit MPS structure
   MPS sub_MPS;
+  sub_MPS.copy_settings(*this);
   sub_MPS.initialize_from_matrix(qubits.size(), state_mat);
 
   // copy the 3-qubit MPS back to the corresponding positions in the original
@@ -780,22 +777,21 @@ void MPS::apply_matrix(const reg_t &qubits, const cmatrix_t &mat,
   apply_matrix_internal(internal_qubits, mat, is_diagonal);
 }
 
-void MPS::apply_matrix_internal(const reg_t &qubits, const cmatrix_t &mat,
-                                bool is_diagonal) {
+uint_t MPS::apply_matrix_internal(const reg_t &qubits, const cmatrix_t &mat,
+                                  bool is_diagonal) {
   switch (qubits.size()) {
   case 1:
     q_reg_[qubits[0]].apply_matrix(mat, is_diagonal);
-    break;
+    return qubits[0];
   case 2:
-    apply_2_qubit_gate(qubits[0], qubits[1], su4, mat, is_diagonal);
-    break;
+    return apply_2_qubit_gate(qubits[0], qubits[1], su4, mat, is_diagonal);
   default:
-    apply_multi_qubit_gate(qubits, mat, is_diagonal);
+    return apply_multi_qubit_gate(qubits, mat, is_diagonal);
   }
 }
 
-void MPS::apply_multi_qubit_gate(const reg_t &qubits, const cmatrix_t &mat,
-                                 bool is_diagonal) {
+uint_t MPS::apply_multi_qubit_gate(const reg_t &qubits, const cmatrix_t &mat,
+                                   bool is_diagonal) {
   // bring the qubits to consecutive positions
   uint_t num_qubits = qubits.size();
   uint_t length = 1ULL << num_qubits;
@@ -830,18 +826,20 @@ void MPS::apply_multi_qubit_gate(const reg_t &qubits, const cmatrix_t &mat,
     }
   }
 
-  if (is_ordered(qubits))
+  if (is_ordered(qubits)) {
     apply_matrix_to_target_qubits(qubits, new_mat, is_diagonal);
-  else
-    apply_unordered_multi_qubit_gate(qubits, new_mat, is_diagonal);
+    return qubits.front();
+  }
+  return apply_unordered_multi_qubit_gate(qubits, new_mat, is_diagonal);
 }
 
-void MPS::apply_unordered_multi_qubit_gate(const reg_t &qubits,
-                                           const cmatrix_t &mat,
-                                           bool is_diagonal) {
+uint_t MPS::apply_unordered_multi_qubit_gate(const reg_t &qubits,
+                                             const cmatrix_t &mat,
+                                             bool is_diagonal) {
   reg_t new_qubits(qubits.size());
   centralize_qubits(qubits, new_qubits);
   apply_matrix_to_target_qubits(new_qubits, mat, is_diagonal);
+  return new_qubits.front();
 }
 
 void MPS::apply_matrix_to_target_qubits(const reg_t &target_qubits,
@@ -861,6 +859,7 @@ void MPS::apply_matrix_to_target_qubits(const reg_t &target_qubits,
 
   // We convert the matrix back into an MPS structure
   MPS sub_MPS;
+  sub_MPS.copy_settings(*this);
   sub_MPS.initialize_from_matrix(num_qubits, state_mat);
 
   if (num_qubits == num_qubits_) {
@@ -914,6 +913,9 @@ void MPS::apply_kraus_internal(const reg_t &qubits,
   double r = rng.rand(0., 1.);
   double accum = 0.;
   bool complete = false;
+  // Where the tensors the operator changed are once it is applied: the first
+  // of qubits.size() consecutive positions.
+  uint_t first = qubits[0];
 
   cmatrix_t rho = density_matrix_internal(qubits);
 
@@ -931,7 +933,7 @@ void MPS::apply_kraus_internal(const reg_t &qubits,
     if (accum > r) {
       // rescale mat so projection is normalized
       cmatrix_t temp_mat = kmats[j] * (1 / std::sqrt(p));
-      apply_matrix_internal(qubits, temp_mat);
+      first = apply_matrix_internal(qubits, temp_mat);
       complete = true;
       break;
     }
@@ -941,16 +943,17 @@ void MPS::apply_kraus_internal(const reg_t &qubits,
     // Compute probability from accumulated
     double renorm = 1 / std::sqrt(1. - accum);
     cmatrix_t temp_mat = kmats.back() * renorm;
-    apply_matrix_internal(qubits, temp_mat);
+    first = apply_matrix_internal(qubits, temp_mat);
   }
 
-  uint_t min_qubit = qubits[0];
-  uint_t max_qubit = qubits[0];
-  for (uint_t i = qubits[0]; i < qubits.size(); i++) {
-    min_qubit = std::min(min_qubit, qubits[i]);
-    max_qubit = std::max(max_qubit, qubits[i]);
-  }
-  propagate_to_neighbors_internal(min_qubit, max_qubit, num_qubits_ - 1);
+  // A Kraus operator is not unitary, so the tensors outside the ones it
+  // changed have to be renormalized, outwards from them. Applying an operator
+  // on several qubits first moves them next to each other, so the sweeps start
+  // from where they are now, not from the positions they were given at: for
+  // qubits that were apart, those left every tensor between them stale, and
+  // an expectation value on one of them wrong.
+  propagate_to_neighbors_internal(first, first + qubits.size() - 1,
+                                  num_qubits_ - 1);
 }
 
 void MPS::centralize_qubits(const reg_t &qubits, reg_t &centralized_qubits) {
@@ -1045,7 +1048,8 @@ cmatrix_t MPS::density_matrix_internal(const reg_t &qubits) const {
   reg_t ordered_vector(size), temp_vector(size), actual_vec(size);
   std::iota(std::begin(ordered_vector), std::end(ordered_vector), 0);
   reorder_all_qubits(ordered_vector, qubits, temp_vector);
-  actual_vec = reverse_all_bits(temp_vector, qubits.size());
+  actual_vec = reverse_all_bits(temp_vector, qubits.size(), omp_threads_,
+                                omp_threshold_);
 
 #ifdef _WIN32
 #pragma omp parallel for if (size > omp_threshold_ && omp_threads_ > 1)        \
@@ -1367,7 +1371,8 @@ Vector<complex_t> MPS::full_state_vector_internal(const reg_t &qubits) {
   // "qubits"
   reorder_all_qubits(statevector, qubits, temp_statevector);
   // reverse to be consistent with qasm ordering
-  return reverse_all_bits(temp_statevector, num_qubits);
+  return reverse_all_bits(temp_statevector, num_qubits, omp_threads_,
+                          omp_threshold_);
 }
 
 Vector<complex_t> MPS::get_amplitude_vector(const reg_t &base_values) {
@@ -1437,7 +1442,8 @@ void MPS::get_probabilities_vector_internal(rvector_t &probvector,
   reorder_all_qubits(ordered_probvector, qubits, temp_probvector);
 
   // reverse to be consistent with qasm ordering
-  probvector = reverse_all_bits(temp_probvector, num_qubits);
+  probvector = reverse_all_bits(temp_probvector, num_qubits, omp_threads_,
+                                omp_threshold_);
 }
 
 double MPS::get_prob_single_qubit_internal(uint_t qubit, uint_t outcome,
@@ -1819,10 +1825,10 @@ void MPS::initialize_from_matrix(uint_t num_qubits, const cmatrix_t &mat) {
       remaining_matrix = mat;
     } else {
       cmatrix_t temp;
-      if (MPS::mps_lapack_) { // When using Lapack, V is V dagger
-        temp = mul_matrix_by_lambda(AER::Utils::dagger(V), S);
+      if (mps_lapack_) { // When using Lapack, V is V dagger
+        temp = mul_matrix_by_lambda(AER::Utils::dagger(V), S, omp_threads_);
       } else {
-        temp = mul_matrix_by_lambda(V, S);
+        temp = mul_matrix_by_lambda(V, S, omp_threads_);
       }
       remaining_matrix = AER::Utils::dagger(temp);
     }
@@ -1830,9 +1836,9 @@ void MPS::initialize_from_matrix(uint_t num_qubits, const cmatrix_t &mat) {
     // step 2 - SVD
     S.clear();
     S.resize(std::min(reshaped_matrix.GetRows(), reshaped_matrix.GetColumns()));
-    csvd_wrapper(reshaped_matrix, U, S, V, MPS::mps_lapack_);
+    csvd_wrapper(reshaped_matrix, U, S, V, mps_lapack_);
     reduce_zeros(U, S, V, get_max_bond_dimension(), get_truncation_threshold(),
-                 MPS::mps_lapack_);
+                 mps_lapack_);
 
     // step 3 - update q_reg_ with new gamma and new lambda
     //          increment number of qubits in the MPS structure
@@ -1849,7 +1855,7 @@ void MPS::initialize_from_matrix(uint_t num_qubits, const cmatrix_t &mat) {
   }
   // step 4 - create the rightmost gamma and update q_reg_
   std::vector<cmatrix_t> right_data;
-  if (MPS::mps_lapack_) {
+  if (mps_lapack_) {
     right_data = reshape_VH_after_SVD(V);
   } else {
     right_data = reshape_V_after_SVD(V);
@@ -1895,6 +1901,7 @@ void MPS::initialize_component_internal(const reg_t &qubits,
   // Therefore we don't need to sort before reset_internal
   reset_internal(new_qubits, rng);
   MPS qubits_mps;
+  qubits_mps.copy_settings(*this);
   qubits_mps.initialize_from_matrix(num_qubits, mat);
   for (uint_t i = first; i <= last; i++) {
     q_reg_[i] = qubits_mps.q_reg_[i - first];
