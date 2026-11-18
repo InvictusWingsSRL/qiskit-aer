@@ -16,6 +16,8 @@ fixes:
     switch) were static, so the last simulator configured set them for every
     MPS in the process, and simulators configured on different threads raced
     on them. Each MPS now has its own, which the temporary copies it makes of
-    itself inherit, including the truncation threshold and the bond limit.
+    itself inherit. The truncation threshold and the bond limit are not
+    inherited: a temporary represents the state as it is, so answering a query
+    never truncates.
     The debug log (``mps_log_data``) is still one stream for the process, now
     written under a lock.

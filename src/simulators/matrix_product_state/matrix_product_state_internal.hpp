@@ -356,10 +356,15 @@ public:
 
   // The settings above belong to each MPS. An MPS that another one builds for
   // itself (a copy to measure or contract, a sub-MPS to write back) takes them
-  // from its owner with this.
+  // from its owner with this, except the bond limit and the truncation
+  // threshold. Those describe the approximation of the simulated state, and a
+  // temporary has to represent that state as it is: answering a query moves
+  // qubits next to each other, which can need larger bonds for a while, and a
+  // temporary that truncated them changed the answer (two Bell pairs on
+  // qubits (0,1) and (2,3) under a bond limit of 2: the marginal of qubits
+  // (0,2) came out as [0.5, 0, 0.5, 0]). A temporary keeps the defaults, no
+  // bond limit and a threshold of 1e-16.
   void copy_settings(const MPS &other) {
-    max_bond_dimension_ = other.max_bond_dimension_;
-    truncation_threshold_ = other.truncation_threshold_;
     omp_threads_ = other.omp_threads_;
     omp_threshold_ = other.omp_threshold_;
     sample_measure_alg_ = other.sample_measure_alg_;
