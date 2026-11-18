@@ -78,6 +78,13 @@ void TransformerAVX2<Container, data_t>::apply_diagonal_matrix(
     Container &data, size_t data_size, int threads, const reg_t &qubits,
     const cvector_t<double> &diag) const {
 
+  // The AVX2 diagonal kernel rebuilds each element's diagonal index from the
+  // qubit list (_load_diagonal_input). Up to five qubits the scalar kernels
+  // are faster at every register size (3.7x on one qubit, 1.6x on two, about
+  // even at five); from six on the AVX2 kernel is.
+  if (qubits.size() <= 5)
+    return Base::apply_diagonal_matrix(data, data_size, threads, qubits, diag);
+
   if (apply_diagonal_matrix_avx<data_t>(
           reinterpret_cast<data_t *>(data), data_size, qubits.data(),
           qubits.size(), reinterpret_cast<data_t *>(Base::convert(diag).data()),

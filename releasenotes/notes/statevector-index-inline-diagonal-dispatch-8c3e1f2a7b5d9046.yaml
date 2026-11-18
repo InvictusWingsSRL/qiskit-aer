@@ -1,0 +1,13 @@
+fixes:
+  - |
+    Sped up statevector gates where the compiler did not inline the index
+    helpers of the gate kernels. In a large translation unit (one that also
+    includes the state controller, as ``AerState`` users compile it), GCC left
+    ``index0`` and ``indexes`` as an out-of-line call per amplitude block,
+    which made a CX up to 5x slower than the same kernel compiled alone. The
+    helpers are now always inlined.
+  - |
+    On AVX2 builds, diagonal gates on up to five qubits now use the scalar
+    kernels, which are faster than ``apply_diagonal_matrix_avx`` at every
+    register size: 3.7x on one qubit (``rz``, ``p``, ``t``, ``s``), 1.6x on
+    two. Diagonals on six or more qubits keep the AVX2 kernel.

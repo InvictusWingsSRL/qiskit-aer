@@ -20,6 +20,18 @@
 #include <memory>
 #include <vector>
 
+// The index helpers run once per amplitude block in every gate kernel
+// (apply_lambda). In a large translation unit, such as one including the state
+// controller, the compiler's inlining limits can leave them as an out-of-line
+// call per iteration, which made a two-qubit gate up to 5x slower.
+#if defined(__GNUC__) || defined(__clang__)
+#define QV_INDEX_INLINE inline __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define QV_INDEX_INLINE __forceinline
+#else
+#define QV_INDEX_INLINE inline
+#endif
+
 namespace AER {
 namespace QV {
 
@@ -173,7 +185,7 @@ const std::array<uint_t, 64> MASKS{{0ULL,
 // Example: k = 77  = 1001101 , qubits_sorted = [1,4]
 // ==> output = 297 = 100101001 (with 0's put into places 1 and 4).
 template <typename list_t>
-uint_t index0(const list_t &qubits_sorted, const uint_t k);
+QV_INDEX_INLINE uint_t index0(const list_t &qubits_sorted, const uint_t k);
 
 // Return a std::unique_ptr to an array of of 2^N in ints
 // each int corresponds to an N qubit bitstring for M-N qubit bits in state k,
@@ -199,8 +211,8 @@ indexes_t indexes(const reg_t &qubits, const reg_t &qubits_sorted,
 
 // As above but returns a fixed sized array of of 2^N in ints
 template <size_t N>
-areg_t<1ULL << N> indexes(const areg_t<N> &qs, const areg_t<N> &qubits_sorted,
-                          const uint_t k);
+QV_INDEX_INLINE areg_t<1ULL << N>
+indexes(const areg_t<N> &qs, const areg_t<N> &qubits_sorted, const uint_t k);
 
 /*******************************************************************************
  *
@@ -209,7 +221,7 @@ areg_t<1ULL << N> indexes(const areg_t<N> &qs, const areg_t<N> &qubits_sorted,
  ******************************************************************************/
 
 template <typename list_t>
-uint_t index0(const list_t &qubits_sorted, const uint_t k) {
+QV_INDEX_INLINE uint_t index0(const list_t &qubits_sorted, const uint_t k) {
   uint_t lowbits, retval = k;
   for (size_t j = 0; j < qubits_sorted.size(); j++) {
     lowbits = retval & MASKS[qubits_sorted[j]];
@@ -221,8 +233,8 @@ uint_t index0(const list_t &qubits_sorted, const uint_t k) {
 }
 
 template <size_t N>
-areg_t<1ULL << N> indexes(const areg_t<N> &qs, const areg_t<N> &qubits_sorted,
-                          const uint_t k) {
+QV_INDEX_INLINE areg_t<1ULL << N>
+indexes(const areg_t<N> &qs, const areg_t<N> &qubits_sorted, const uint_t k) {
   areg_t<1ULL << N> ret;
   ret[0] = index0(qubits_sorted, k);
   for (size_t i = 0; i < N; i++) {
