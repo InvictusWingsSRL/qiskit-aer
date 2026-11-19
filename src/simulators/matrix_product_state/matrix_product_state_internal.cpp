@@ -13,6 +13,7 @@
  */
 
 #include <bitset>
+#include <limits>
 #include <math.h>
 
 #include "stdio.h"
@@ -1431,17 +1432,24 @@ Vector<complex_t> MPS::full_state_vector_internal(const reg_t &qubits) {
 
 Vector<complex_t> MPS::get_amplitude_vector(const reg_t &base_values) {
   uint_t num_values = base_values.size();
-  std::string base_value;
   Vector<complex_t> amplitude_vector(num_values, false);
+  constexpr uint_t index_bits = std::numeric_limits<uint_t>::digits;
 
 #pragma omp parallel for if (num_values > omp_threshold_ && omp_threads_ > 1)  \
     num_threads(omp_threads_)
   for (int_t i = 0; i < static_cast<int_t>(num_values); i++) {
-    // Since the qubits may not be ordered, we determine the actual index
-    // by the internal order of the qubits, to obtain the actual_base_value
-    uint_t actual_base_value =
-        reorder_qubits_rev(qubit_ordering_.order_, base_values[i]);
-    base_value = AER::Utils::int2string(actual_base_value);
+    // The bits of the basis state in the internal order of the qubits, as
+    // get_single_amplitude reads them (internal qubit 0 last), taken bit by
+    // bit from the qubit order. Not through a reordered index: from 65 qubits
+    // the internal index need not fit in a uint_t, and a shift by 64 or more
+    // is undefined (on x86 it wrapped, and qubit 64 read as qubit 0). One
+    // string per iteration: a shared one raced between threads.
+    std::string base_value(num_qubits_, '0');
+    for (uint_t position = 0; position < num_qubits_; position++) {
+      const uint_t qubit = qubit_ordering_.order_[position];
+      if (qubit < index_bits && ((base_values[i] >> qubit) & 1ULL))
+        base_value[num_qubits_ - 1 - position] = '1';
+    }
     amplitude_vector[i] = get_single_amplitude(base_value);
   }
   return amplitude_vector;

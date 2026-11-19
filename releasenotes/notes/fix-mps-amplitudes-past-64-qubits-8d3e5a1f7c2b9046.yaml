@@ -1,0 +1,12 @@
+---
+fixes:
+  - |
+    The matrix product state method read the amplitude and probability of a
+    basis state through an index reordered into the internal order of the
+    qubits. From 65 qubits that index need not fit in 64 bits, and the qubit
+    masks were shifted by 64 or more, which is undefined (on x86 the bit of
+    qubit 64 read as qubit 0): after an X on qubit 0 of a 65-qubit register,
+    the probability and amplitude of basis state 1 read as 0. The bits of the
+    basis state are now taken directly in the internal order. The string of
+    bits was also shared between the threads that read several amplitudes at
+    once; each read now has its own.
