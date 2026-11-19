@@ -1,0 +1,10 @@
+fixes:
+  - |
+    Fixed the ``matrix_product_state`` simulator reading the wrong basis state
+    for an index with qubit 63 set. The helpers that map an index between the
+    simulator's internal qubit order and the user's kept the bit of a qubit in
+    a signed integer, so the bit of qubit 63 was negative, and shifting it
+    right spread its sign over the bits below. On 64 qubits, the probability
+    and amplitude of such a basis state came out as 0: after ``x`` on qubit 0
+    and ``cx`` from qubit 0 to 63, the state ``2**63 + 1`` had probability 0,
+    while the marginal of qubits 0 and 63 gave 1 to ``11``.

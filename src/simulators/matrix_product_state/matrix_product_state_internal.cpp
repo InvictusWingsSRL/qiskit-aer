@@ -183,7 +183,12 @@ void reorder_all_qubits(const vec_t &orig_probvector, const reg_t &qubits,
 uint_t reorder_qubits(const reg_t &qubits, uint_t index) {
   uint_t new_index = 0;
 
-  int_t current_pos = 0, current_val = 0, new_pos = 0, shift = 0;
+  // The bit of a qubit is unsigned: as an int_t, the bit of qubit 63 was
+  // negative, and shifting it right spread its sign over the bits below, so a
+  // basis state with qubit 63 set mapped to a wrong index (its probability and
+  // amplitude read as 0 on 64 qubits).
+  int_t current_pos = 0, new_pos = 0, shift = 0;
+  uint_t current_val = 0;
   uint_t num_qubits = qubits.size();
   for (uint_t i = 0; i < num_qubits; i++) {
     current_pos = num_qubits - 1 - qubits[i];
@@ -206,7 +211,9 @@ uint_t reorder_qubits(const reg_t &qubits, uint_t index) {
 uint_t reorder_qubits_rev(const reg_t &qubits, uint_t index) {
   uint_t new_index = 0;
 
-  int_t current_pos = 0, current_val = 0, new_pos = 0, shift = 0;
+  // Unsigned, as in reorder_qubits.
+  int_t current_pos = 0, new_pos = 0, shift = 0;
+  uint_t current_val = 0;
   uint_t num_qubits = qubits.size();
   for (uint_t i = 0; i < num_qubits; i++) {
     current_pos = qubits[i];
@@ -249,7 +256,9 @@ uint_t permute_qubits(const reg_t &input_qubits, uint_t index,
   // pos is from right to left, i.e., msb has pos 0, and lsb has pos
   // num_qubits-1 This is in line with the ordering of the qubits in the MPS
   // structure
-  int_t current_pos = 0, current_val = 0, new_pos = 0, shift = 0;
+  // Unsigned, as in reorder_qubits.
+  int_t current_pos = 0, new_pos = 0, shift = 0;
+  uint_t current_val = 0;
   uint_t num_qubits = input_qubits.size();
 
   for (uint_t in = 0; in < num_qubits; in++) {
